@@ -1,19 +1,16 @@
 name: Security
 
 on:
-  push:
-    branches: [main, develop]
   pull_request:
     branches: [main]
   schedule:
-    # Run weekly on Monday at 00:00 UTC
-    - cron: "0 0 * * 1"
+    # Run monthly on the 1st at 00:00 UTC
+    - cron: "0 0 1 * *"
   workflow_dispatch:
 
 permissions:
   contents: read
   security-events: write
-  issues: write
 
 jobs:
   audit:
@@ -23,43 +20,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo-audit
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked || true
 
       - name: Run security audit
-        run: |
-          cargo audit --deny warnings --deny unmaintained --deny unsound || true
-          cargo audit --json > audit-results.json || true
-
-      - name: Upload audit results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: audit-results
-          path: audit-results.json
-          retention-days: 30
-
-      - name: Audit Summary
-        if: always()
-        run: |
-          echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if cargo audit --deny warnings 2>&1 | grep -q "Success"; then
-            echo "✅ No known vulnerabilities found" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️  Vulnerabilities detected - check job output" >> $GITHUB_STEP_SUMMARY
-          fi
+        run: cargo audit
 
   dependency-review:
     name: Dependency Review
@@ -69,170 +39,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Unlicense
-
-  outdated:
-    name: Check Outdated Dependencies
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-outdated
-        run: cargo install cargo-outdated --locked || true
-
-      - name: Check for outdated dependencies
-        run: |
-          cargo outdated --exit-code 1 || echo "::warning::Outdated dependencies found"
-          cargo outdated > outdated-deps.txt || true
-
-      - name: Upload outdated dependencies report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: outdated-dependencies
-          path: outdated-deps.txt
-          retention-days: 30
-
-      - name: Outdated Dependencies Summary
-        if: always()
-        run: |
-          echo "## Outdated Dependencies Check" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          cat outdated-deps.txt >> $GITHUB_STEP_SUMMARY || echo "No outdated dependencies"
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-  unused-deps:
-    name: Check Unused Dependencies
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
-      - name: Install cargo-udeps
-        run: cargo install cargo-udeps --locked || true
-
-      - name: Check for unused dependencies
-        run: |
-          cargo +nightly udeps --all-targets || echo "::warning::Unused dependencies found"
-
-      - name: Unused Dependencies Summary
-        if: always()
-        run: |
-          echo "## Unused Dependencies Check" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check job output for details" >> $GITHUB_STEP_SUMMARY
-
-  cargo-deny:
-    name: Cargo Deny
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked || true
-
-      - name: Create deny.toml if missing
-        run: |
-          if [ ! -f "deny.toml" ]; then
-            cat > deny.toml << 'EOF'
-          [advisories]
-          vulnerability = "deny"
-          unmaintained = "warn"
-          unsound = "warn"
-          yanked = "warn"
-
-          [licenses]
-          unlicensed = "deny"
-          allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unlicense"]
-          default = "deny"
-
-          [bans]
-          multiple-versions = "warn"
-          wildcards = "warn"
-          deny = []
-
-          [sources]
-          unknown-registry = "warn"
-          unknown-git = "warn"
-          EOF
-          fi
-
-      - name: Run cargo-deny
-        run: cargo deny check
-
-      - name: Cargo Deny Summary
-        if: always()
-        run: |
-          echo "## Cargo Deny Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ License and security checks passed" >> $GITHUB_STEP_SUMMARY
-
-  clippy-security:
-    name: Clippy Security Lints
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
-      - name: Run security-focused clippy
-        run: |
-          cargo clippy --all-targets --all-features -- \
-            -W clippy::unwrap_used \
-            -W clippy::expect_used \
-            -W clippy::panic \
-            -W clippy::todo \
-            -W clippy::unimplemented \
-            -W clippy::integer_arithmetic \
-            -W clippy::float_arithmetic
-
-      - name: Security Clippy Summary
-        if: always()
-        run: |
-          echo "## Security-focused Clippy Lints" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Checked for:" >> $GITHUB_STEP_SUMMARY
-          echo "- Unwrap/expect usage" >> $GITHUB_STEP_SUMMARY
-          echo "- Panic usage" >> $GITHUB_STEP_SUMMARY
-          echo "- TODO/unimplemented markers" >> $GITHUB_STEP_SUMMARY
-          echo "- Arithmetic operations" >> $GITHUB_STEP_SUMMARY

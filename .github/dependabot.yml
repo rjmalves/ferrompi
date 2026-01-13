@@ -4,10 +4,8 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 3
     reviewers:
       - "rjmalves"
     commit-message:
@@ -15,31 +13,27 @@ updates:
       include: "scope"
     labels:
       - "dependencies"
-      - "rust"
     groups:
-      patch-updates:
+      all-dependencies:
         patterns:
           - "*"
         update-types:
           - "patch"
-      minor-updates:
-        patterns:
-          - "*"
-        update-types:
           - "minor"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 2
     reviewers:
       - "rjmalves"
     commit-message:
       prefix: "ci"
     labels:
-      - "dependencies"
-      - "github-actions"
+      - "ci-cd"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

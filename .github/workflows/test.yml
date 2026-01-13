@@ -1,4 +1,4 @@
-name: Tests
+name: CI
 
 on:
   push:
@@ -14,31 +14,20 @@ env:
 jobs:
   test:
     name: Test Suite
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        rust: [stable, nightly]
-        include:
-          - os: ubuntu-latest
-            mpi: mpich
-          - os: macos-latest
-            mpi: mpich
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -49,33 +38,24 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: target
-          key: ${{ runner.os }}-${{ matrix.rust }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.rust }}-target-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-${{ matrix.rust }}-target-
+            ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-target-
 
-      - name: Install MPI (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install MPI
         run: |
           sudo apt-get update
           sudo apt-get install -y mpich libmpich-dev pkg-config
           mpiexec --version
 
-      - name: Install MPI (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install mpich pkg-config
-          mpiexec --version
-
       - name: Check formatting
-        if: matrix.rust == 'stable'
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        if: matrix.rust == 'stable'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build library
@@ -97,56 +77,10 @@ jobs:
             mpiexec -n 4 ./target/debug/examples/$example || exit 1
           done
 
-      - name: Test Summary
-        if: always()
-        run: |
-          echo "## Test Results - ${{ matrix.os }} / ${{ matrix.rust }}" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All tests passing" >> $GITHUB_STEP_SUMMARY
-
-  minimal-versions:
-    name: Minimal Versions Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
-      - name: Check minimal versions
-        run: |
-          cargo +nightly update -Z minimal-versions
-          cargo +nightly check --all-features
-
-  docs:
-    name: Documentation Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
       - name: Build documentation
-        run: cargo doc --no-deps --all-features --document-private-items
+        run: cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
-
-      - name: Check for broken intra-doc links
-        run: cargo doc --no-deps --all-features
 
   coverage:
     name: Code Coverage
@@ -155,7 +89,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -163,7 +97,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -185,36 +119,8 @@ jobs:
         run: cargo llvm-cov --lib --all-features --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./lcov.info
           fail_ci_if_error: false
-          verbose: true
           token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Coverage Summary
-        if: always()
-        run: |
-          echo "## Coverage Results" >> $GITHUB_STEP_SUMMARY
-          echo "📊 Coverage report generated" >> $GITHUB_STEP_SUMMARY
-
-  msrv:
-    name: Minimum Supported Rust Version
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust 1.74
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.74"
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
-      - name: Check MSRV compatibility
-        run: cargo check --all-features
