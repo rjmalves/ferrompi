@@ -44,8 +44,17 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", path.display());
     }
 
+    // Only link the main MPI library
+    // The MPI library will handle its own dependencies (hwloc, pmix, etc.)
+    // Explicitly linking transitive dependencies can cause linker errors
+    // when those libraries are not in standard search paths
     for lib in &mpi_config.libs {
-        println!("cargo:rustc-link-lib={lib}");
+        // Filter out common transitive dependencies
+        // Keep only the main MPI library and essential system libraries
+        let skip_libs = ["hwloc", "pmix", "ucp", "ucs", "ucx", "slurm", "amdhip64"];
+        if !skip_libs.contains(&lib.as_str()) {
+            println!("cargo:rustc-link-lib={lib}");
+        }
     }
 
     // Export MPI version info for Rust code
