@@ -34,6 +34,10 @@ path = "examples/persistent_bcast.rs"
 name = "nonblocking"
 path = "examples/nonblocking.rs"
 
+[[example]]
+name = "pi_monte_carlo"
+path = "examples/pi_monte_carlo.rs"
+
 [dependencies]
 thiserror = "2.0"
 

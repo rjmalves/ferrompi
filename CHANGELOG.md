@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 - MPI 4.0+ support with persistent collectives
 - Safe Rust API for MPI operations
-- Examples: hello_world, ring, allreduce, nonblocking, persistent_bcast
+- Examples: hello_world, ring, allreduce, nonblocking, persistent_bcast, pi_monte_carlo
 - Comprehensive documentation
 
 [Unreleased]: https://github.com/rjmalves/ferrompi/compare/v0.1.0...HEAD

@@ -80,7 +80,7 @@ cargo test --all-features
 
 ```bash
 cargo build --examples --release
-for ex in hello_world ring allreduce nonblocking persistent_bcast; do
+for ex in hello_world ring allreduce nonblocking persistent_bcast pi_monte_carlo; do
   mpiexec -n 4 ./target/release/examples/$ex
 done
 ```
@@ -269,7 +269,6 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 - Open an issue for questions
 - Check existing issues and PRs
-- Read the [CI/CD documentation](.github/CI_CD.md)
 
 ## Recognition
 

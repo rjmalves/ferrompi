@@ -5,9 +5,9 @@
 [![Crates.io](https://img.shields.io/crates/v/ferrompi.svg)](https://crates.io/crates/ferrompi)
 [![Documentation](https://docs.rs/ferrompi/badge.svg)](https://docs.rs/ferrompi)
 [![License](https://img.shields.io/crates/l/ferrompi.svg)](LICENSE)
-[![CI](https://github.com/rjmalves/ferrompi/workflows/Tests/badge.svg)](https://github.com/rjmalves/ferrompi/actions?query=workflow%3ATests)
+[![CI](https://github.com/rjmalves/ferrompi/actions/workflows/test.yml/badge.svg)](https://github.com/rjmalves/ferrompi/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/rjmalves/ferrompi/branch/main/graph/badge.svg)](https://codecov.io/gh/rjmalves/ferrompi)
-[![Security](https://github.com/rjmalves/ferrompi/workflows/Security/badge.svg)](https://github.com/rjmalves/ferrompi/actions?query=workflow%3ASecurity)
+[![Security](https://github.com/rjmalves/ferrompi/actions/workflows/security.yml/badge.svg)](https://github.com/rjmalves/ferrompi/actions/workflows/security.yml)
 
 FerroMPI provides Rust bindings to MPI through a thin C wrapper layer, enabling access to MPI 4.0+ features like **persistent collectives** that are not available in other Rust MPI bindings.
 
