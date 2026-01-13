@@ -44,15 +44,16 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", path.display());
     }
 
-    // Only link the main MPI library
-    // The MPI library will handle its own dependencies (hwloc, pmix, etc.)
+    // Only link the main MPI library and essential system libraries
+    // The MPI library (e.g., mpich, mpi, ompi) will handle its own dependencies (hwloc, pmix, etc.)
     // Explicitly linking transitive dependencies can cause linker errors
     // when those libraries are not in standard search paths
+    
+    // Common transitive dependencies that should be handled by the main MPI library
+    const SKIP_LIBS: &[&str] = &["hwloc", "pmix", "ucp", "ucs", "ucx", "slurm", "amdhip64"];
+    
     for lib in &mpi_config.libs {
-        // Filter out common transitive dependencies
-        // Keep only the main MPI library and essential system libraries
-        let skip_libs = ["hwloc", "pmix", "ucp", "ucs", "ucx", "slurm", "amdhip64"];
-        if !skip_libs.contains(&lib.as_str()) {
+        if !SKIP_LIBS.contains(&lib.as_str()) {
             println!("cargo:rustc-link-lib={lib}");
         }
     }
