@@ -38,7 +38,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -49,7 +49,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: target
           key: ${{ runner.os }}-${{ matrix.rust }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
@@ -163,7 +163,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
