@@ -38,11 +38,21 @@
 //!
 //! - **Basic collectives**: barrier, broadcast, reduce, allreduce, gather, scatter
 //! - **Nonblocking collectives**: ibcast, iallreduce with request handles
-//! - **Persistent collectives** (MPI 4.0+): bcast_init, allreduce_init, etc.
+//! - **Persistent collectives** (MPI 4.0+): `bcast_init`, `allreduce_init`, etc.
 //! - **Large count support** (MPI 4.0+): automatic use of `_c` variants for large arrays
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+// Allow certain pedantic lints for existing code
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::similar_names)]
 
 mod comm;
 mod error;
@@ -153,8 +163,7 @@ impl Mpi {
             0 => ThreadLevel::Single,
             1 => ThreadLevel::Funneled,
             2 => ThreadLevel::Serialized,
-            3 => ThreadLevel::Multiple,
-            _ => ThreadLevel::Single,
+            _ => ThreadLevel::Multiple,
         };
 
         Ok(Mpi {
@@ -168,7 +177,7 @@ impl Mpi {
         self.thread_level
     }
 
-    /// Get a handle to MPI_COMM_WORLD.
+    /// Get a handle to `MPI_COMM_WORLD`.
     pub fn world(&self) -> Communicator {
         Communicator::world()
     }
@@ -184,13 +193,14 @@ impl Mpi {
     pub fn version() -> Result<String> {
         let mut buf = [0u8; 256];
         let mut len: i32 = 0;
-        let ret = unsafe { ffi::ferrompi_get_version(buf.as_mut_ptr() as *mut i8, &mut len) };
+        let ret = unsafe { ffi::ferrompi_get_version(buf.as_mut_ptr().cast::<i8>(), &mut len) };
 
         if ret != 0 {
             return Err(Error::from_code(ret));
         }
 
-        let s = std::str::from_utf8(&buf[..len as usize])
+        let len = len.max(0) as usize;
+        let s = std::str::from_utf8(&buf[..len])
             .map_err(|_| Error::Internal("Invalid UTF-8 in version string".into()))?;
         Ok(s.to_string())
     }

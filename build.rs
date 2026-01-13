@@ -45,12 +45,12 @@ fn main() {
     }
 
     for lib in &mpi_config.libs {
-        println!("cargo:rustc-link-lib={}", lib);
+        println!("cargo:rustc-link-lib={lib}");
     }
 
     // Export MPI version info for Rust code
     if let Some(version) = mpi_config.version {
-        println!("cargo:rustc-env=MPI_VERSION={}", version);
+        println!("cargo:rustc-env=MPI_VERSION={version}");
     }
 }
 
@@ -65,7 +65,7 @@ fn find_mpi_config() -> MpiConfig {
     // Strategy 1: Use MPI_PKG_CONFIG environment variable
     if let Ok(pkg_name) = env::var("MPI_PKG_CONFIG") {
         if let Ok(config) = try_pkg_config(&pkg_name) {
-            eprintln!("Found MPI via MPI_PKG_CONFIG={}", pkg_name);
+            eprintln!("Found MPI via MPI_PKG_CONFIG={pkg_name}");
             return config;
         }
     }
@@ -73,7 +73,7 @@ fn find_mpi_config() -> MpiConfig {
     // Strategy 2: Try common pkg-config names
     for pkg_name in &["mpich", "ompi", "mpi"] {
         if let Ok(config) = try_pkg_config(pkg_name) {
-            eprintln!("Found MPI via pkg-config: {}", pkg_name);
+            eprintln!("Found MPI via pkg-config: {pkg_name}");
             return config;
         }
     }
@@ -86,10 +86,10 @@ fn find_mpi_config() -> MpiConfig {
 
     // Strategy 4: Check for Cray environment
     if let Ok(mpich_dir) = env::var("CRAY_MPICH_DIR") {
-        eprintln!("Found Cray MPI at {}", mpich_dir);
+        eprintln!("Found Cray MPI at {mpich_dir}");
         return MpiConfig {
-            include_paths: vec![PathBuf::from(format!("{}/include", mpich_dir))],
-            link_paths: vec![PathBuf::from(format!("{}/lib", mpich_dir))],
+            include_paths: vec![PathBuf::from(format!("{mpich_dir}/include"))],
+            link_paths: vec![PathBuf::from(format!("{mpich_dir}/lib"))],
             libs: vec!["mpi".to_string()],
             version: None,
         };
@@ -97,10 +97,10 @@ fn find_mpi_config() -> MpiConfig {
 
     // Strategy 5: Try common installation paths
     for prefix in &["/usr", "/usr/local", "/opt/mpich", "/opt/openmpi"] {
-        let include = PathBuf::from(format!("{}/include", prefix));
-        let lib = PathBuf::from(format!("{}/lib", prefix));
+        let include = PathBuf::from(format!("{prefix}/include"));
+        let lib = PathBuf::from(format!("{prefix}/lib"));
         if include.join("mpi.h").exists() {
-            eprintln!("Found MPI at {}", prefix);
+            eprintln!("Found MPI at {prefix}");
             return MpiConfig {
                 include_paths: vec![include],
                 link_paths: vec![lib],
@@ -137,7 +137,7 @@ fn try_mpicc() -> Result<MpiConfig, String> {
     let output = Command::new(&mpicc)
         .arg("-show")
         .output()
-        .map_err(|e| format!("Failed to run '{}': {}", mpicc, e))?;
+        .map_err(|e| format!("Failed to run '{mpicc}': {e}"))?;
 
     if !output.status.success() {
         return Err("mpicc -show failed".to_string());
@@ -147,6 +147,7 @@ fn try_mpicc() -> Result<MpiConfig, String> {
     parse_mpicc_show(&show_output)
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn parse_mpicc_show(output: &str) -> Result<MpiConfig, String> {
     let mut include_paths = Vec::new();
     let mut link_paths = Vec::new();

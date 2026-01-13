@@ -42,10 +42,17 @@ fn main() -> Result<()> {
 
         // Verify the result
         let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        assert_eq!(data, expected, "Nonblocking broadcast failed on rank {}", rank);
+        assert_eq!(
+            data, expected,
+            "Nonblocking broadcast failed on rank {}",
+            rank
+        );
 
         if rank == 0 {
-            println!("✓ Nonblocking broadcast test passed (elapsed: {:.6}s)", elapsed);
+            println!(
+                "✓ Nonblocking broadcast test passed (elapsed: {:.6}s)",
+                elapsed
+            );
             println!("  (computed {} during communication)", compute_result);
         }
     }
@@ -76,12 +83,18 @@ fn main() -> Result<()> {
         // Verify: sum should be 1 + 2 + ... + size
         let expected_sum: f64 = (1..=size).map(|x| x as f64).sum();
         for &val in &recv {
-            assert!((val - expected_sum).abs() < 1e-10,
-                    "Nonblocking allreduce failed on rank {}", rank);
+            assert!(
+                (val - expected_sum).abs() < 1e-10,
+                "Nonblocking allreduce failed on rank {}",
+                rank
+            );
         }
 
         if rank == 0 {
-            println!("✓ Nonblocking all-reduce test passed (elapsed: {:.6}s)", elapsed);
+            println!(
+                "✓ Nonblocking all-reduce test passed (elapsed: {:.6}s)",
+                elapsed
+            );
             println!("  (did {} units of work during communication)", work_done);
         }
     }
@@ -93,9 +106,21 @@ fn main() -> Result<()> {
     // ============================================================
     {
         // Start multiple broadcasts
-        let mut data1 = if rank == 0 { vec![1.0; 10] } else { vec![0.0; 10] };
-        let mut data2 = if rank == 0 { vec![2.0; 10] } else { vec![0.0; 10] };
-        let mut data3 = if rank == 0 { vec![3.0; 10] } else { vec![0.0; 10] };
+        let mut data1 = if rank == 0 {
+            vec![1.0; 10]
+        } else {
+            vec![0.0; 10]
+        };
+        let mut data2 = if rank == 0 {
+            vec![2.0; 10]
+        } else {
+            vec![0.0; 10]
+        };
+        let mut data3 = if rank == 0 {
+            vec![3.0; 10]
+        } else {
+            vec![0.0; 10]
+        };
 
         let req1 = world.ibroadcast_f64(&mut data1, 0)?;
         let req2 = world.ibroadcast_f64(&mut data2, 0)?;
@@ -120,7 +145,11 @@ fn main() -> Result<()> {
     // Test 4: Using test() to poll for completion
     // ============================================================
     {
-        let mut data = if rank == 0 { vec![42.0; 100] } else { vec![0.0; 100] };
+        let mut data = if rank == 0 {
+            vec![42.0; 100]
+        } else {
+            vec![0.0; 100]
+        };
 
         let mut request = world.ibroadcast_f64(&mut data, 0)?;
 

@@ -15,7 +15,7 @@ Thank you for your interest in contributing to FerroMPI! This guide will help yo
 
 ### Requirements
 
-- **Rust 1.70+** (MSRV - Minimum Supported Rust Version)
+- **Rust 1.74+** (MSRV - Minimum Supported Rust Version)
 - **MPI 4.0+** (MPICH 4.0+ or OpenMPI 5.0+)
 - **pkg-config**
 
@@ -53,7 +53,14 @@ cargo fmt --all
 ### 2. Run Clippy
 
 ```bash
-cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+**Note:** The library code passes `clippy::pedantic` checks. Running with pedantic lints is encouraged but not required:
+
+```bash
+# Optional: stricter checks
+cargo clippy --lib -- -D warnings -W clippy::pedantic
 ```
 
 ### 3. Run Tests

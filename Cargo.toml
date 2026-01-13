@@ -2,6 +2,7 @@
 name = "ferrompi"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 authors = ["Rogerio Alves"]
 description = "A thin wrapper for Rust to access the C API of MPICH / OpenMP"
 license = "MIT OR Apache-2.0"

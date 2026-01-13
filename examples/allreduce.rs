@@ -111,7 +111,12 @@ fn main() -> Result<()> {
 
         // Sum of 0 + 1 + ... + (size-1)
         let expected: f64 = (0..size).map(|x| x as f64).sum();
-        assert_eq!(data, vec![expected; 3], "Allreduce in-place failed on rank {}", rank);
+        assert_eq!(
+            data,
+            vec![expected; 3],
+            "Allreduce in-place failed on rank {}",
+            rank
+        );
 
         if rank == 0 {
             println!("✓ Allreduce in-place test passed");
@@ -136,7 +141,12 @@ fn main() -> Result<()> {
             for r in 0..size {
                 let idx = r as usize * 2;
                 assert_eq!(recv[idx], r as f64 * 10.0, "Gather failed at index {}", idx);
-                assert_eq!(recv[idx + 1], r as f64 * 10.0 + 1.0, "Gather failed at index {}", idx + 1);
+                assert_eq!(
+                    recv[idx + 1],
+                    r as f64 * 10.0 + 1.0,
+                    "Gather failed at index {}",
+                    idx + 1
+                );
             }
             println!("✓ Gather test passed (received {} elements)", recv.len());
         }
@@ -152,7 +162,11 @@ fn main() -> Result<()> {
         world.allgather_f64(&send, &mut recv)?;
 
         for r in 0..size {
-            assert_eq!(recv[r as usize], r as f64, "Allgather failed on rank {}", rank);
+            assert_eq!(
+                recv[r as usize], r as f64,
+                "Allgather failed on rank {}",
+                rank
+            );
         }
 
         if rank == 0 {
@@ -174,8 +188,17 @@ fn main() -> Result<()> {
         world.scatter_f64(&send, &mut recv, 0)?;
 
         let expected_start = rank * 2;
-        assert_eq!(recv[0], expected_start as f64, "Scatter failed on rank {}", rank);
-        assert_eq!(recv[1], (expected_start + 1) as f64, "Scatter failed on rank {}", rank);
+        assert_eq!(
+            recv[0], expected_start as f64,
+            "Scatter failed on rank {}",
+            rank
+        );
+        assert_eq!(
+            recv[1],
+            (expected_start + 1) as f64,
+            "Scatter failed on rank {}",
+            rank
+        );
 
         if rank == 0 {
             println!("✓ Scatter test passed");

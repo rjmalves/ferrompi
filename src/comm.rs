@@ -30,7 +30,7 @@ pub struct Communicator {
 }
 
 impl Communicator {
-    /// Get a handle to MPI_COMM_WORLD.
+    /// Get a handle to `MPI_COMM_WORLD`.
     pub(crate) fn world() -> Self {
         Communicator {
             handle: unsafe { ffi::ferrompi_comm_world() },
@@ -62,9 +62,10 @@ impl Communicator {
         let mut buf = [0u8; 256];
         let mut len: i32 = 0;
         let ret =
-            unsafe { ffi::ferrompi_get_processor_name(buf.as_mut_ptr() as *mut i8, &mut len) };
+            unsafe { ffi::ferrompi_get_processor_name(buf.as_mut_ptr().cast::<i8>(), &mut len) };
         Error::check(ret)?;
-        let s = std::str::from_utf8(&buf[..len as usize])
+        let len = len.max(0) as usize;
+        let s = std::str::from_utf8(&buf[..len])
             .map_err(|_| Error::Internal("Invalid UTF-8 in processor name".into()))?;
         Ok(s.to_string())
     }
@@ -107,7 +108,7 @@ impl Communicator {
 
     /// Receive a slice of f64 values from another process.
     ///
-    /// Use `source = -1` for MPI_ANY_SOURCE and `tag = -1` for MPI_ANY_TAG.
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
     ///
     /// Returns `(actual_source, actual_tag, actual_count)`.
     pub fn recv_f64(&self, data: &mut [f64], source: i32, tag: i32) -> Result<(i32, i32, i64)> {
@@ -168,7 +169,7 @@ impl Communicator {
     pub fn broadcast_bytes(&self, data: &mut [u8], root: i32) -> Result<()> {
         let ret = unsafe {
             ffi::ferrompi_bcast_bytes(
-                data.as_mut_ptr() as *mut std::ffi::c_void,
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
                 root,
                 self.handle,

@@ -52,13 +52,12 @@ pub enum Error {
 impl Error {
     /// Create an error from an MPI error code.
     ///
-    /// Returns Ok(()) for MPI_SUCCESS (0), otherwise returns an error.
+    /// Returns `Ok(())` for `MPI_SUCCESS` (0), otherwise returns an error.
     pub fn from_code(code: i32) -> Self {
         match code {
             0 => panic!("from_code called with success code"),
             // Common MPI error codes (these values are implementation-specific,
             // but we provide some common mappings)
-            1..=10 => Error::MpiError(code),
             _ => Error::MpiError(code),
         }
     }

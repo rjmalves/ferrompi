@@ -48,7 +48,7 @@ ferrompi = "0.1"
 
 ### Requirements
 
-- **Rust 1.70+**
+- **Rust 1.74+**
 - **MPICH 4.0+** (recommended) or **OpenMPI 5.0+**
 
 **Ubuntu/Debian:**

@@ -64,7 +64,10 @@ fn main() -> Result<()> {
                         debug_assert!(
                             (x - expected).abs() < 1e-10,
                             "Mismatch at iter {}, index {}: expected {}, got {}",
-                            iter, i, expected, x
+                            iter,
+                            i,
+                            expected,
+                            x
                         );
                     }
                 }
@@ -76,7 +79,10 @@ fn main() -> Result<()> {
             world.barrier()?;
 
             if rank == 0 {
-                println!("  ✓ {} iterations completed in {:.4}s", num_iterations, elapsed);
+                println!(
+                    "  ✓ {} iterations completed in {:.4}s",
+                    num_iterations, elapsed
+                );
                 println!("  ✓ Throughput: {:.1} broadcasts/second", throughput);
             }
         }
@@ -120,7 +126,8 @@ fn main() -> Result<()> {
                 for &x in &allreduce_recv {
                     debug_assert!(
                         (x - expected).abs() < 1e-10,
-                        "Allreduce mismatch at iter {}", iter
+                        "Allreduce mismatch at iter {}",
+                        iter
                     );
                 }
             }
@@ -131,7 +138,10 @@ fn main() -> Result<()> {
             world.barrier()?;
 
             if rank == 0 {
-                println!("  ✓ {} iterations completed in {:.4}s", num_iterations, elapsed);
+                println!(
+                    "  ✓ {} iterations completed in {:.4}s",
+                    num_iterations, elapsed
+                );
                 println!("  ✓ Throughput: {:.1} all-reduces/second", throughput);
             }
         }
@@ -172,9 +182,12 @@ fn main() -> Result<()> {
         let non_persistent_time = Mpi::wtime() - start;
 
         if rank == 0 {
-            println!("  Non-persistent: {} broadcasts in {:.4}s ({:.1}/s)",
-                     compare_iterations, non_persistent_time,
-                     compare_iterations as f64 / non_persistent_time);
+            println!(
+                "  Non-persistent: {} broadcasts in {:.4}s ({:.1}/s)",
+                compare_iterations,
+                non_persistent_time,
+                compare_iterations as f64 / non_persistent_time
+            );
         }
     }
 
@@ -198,9 +211,12 @@ fn main() -> Result<()> {
             let persistent_time = Mpi::wtime() - start;
 
             if rank == 0 {
-                println!("  Persistent:     {} broadcasts in {:.4}s ({:.1}/s)",
-                         compare_iterations, persistent_time,
-                         compare_iterations as f64 / persistent_time);
+                println!(
+                    "  Persistent:     {} broadcasts in {:.4}s ({:.1}/s)",
+                    compare_iterations,
+                    persistent_time,
+                    compare_iterations as f64 / persistent_time
+                );
             }
         }
     }
