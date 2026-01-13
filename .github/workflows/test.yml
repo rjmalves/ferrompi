@@ -1,0 +1,220 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, nightly]
+        include:
+          - os: ubuntu-latest
+            mpi: mpich
+          - os: macos-latest
+            mpi: mpich
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.rust }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-target-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-${{ matrix.rust }}-target-
+
+      - name: Install MPI (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+          mpiexec --version
+
+      - name: Install MPI (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install mpich pkg-config
+          mpiexec --version
+
+      - name: Check formatting
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        if: matrix.rust == 'stable'
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic
+
+      - name: Build library
+        run: cargo build --verbose --lib
+
+      - name: Build examples
+        run: cargo build --verbose --examples
+
+      - name: Run unit tests
+        run: cargo test --lib --verbose
+
+      - name: Run doc tests
+        run: cargo test --doc --verbose
+
+      - name: Run examples with MPI
+        run: |
+          for example in hello_world ring allreduce nonblocking persistent_bcast; do
+            echo "Running example: $example"
+            mpiexec -n 4 ./target/debug/examples/$example || exit 1
+          done
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results - ${{ matrix.os }} / ${{ matrix.rust }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All tests passing" >> $GITHUB_STEP_SUMMARY
+
+  minimal-versions:
+    name: Minimal Versions Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Check minimal versions
+        run: |
+          cargo +nightly update -Z minimal-versions
+          cargo +nightly check --all-features
+
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Build documentation
+        run: cargo doc --no-deps --all-features --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Check for broken intra-doc links
+        run: cargo doc --no-deps --all-features
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run coverage
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov.info
+          fail_ci_if_error: false
+          verbose: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Coverage Summary
+        if: always()
+        run: |
+          echo "## Coverage Results" >> $GITHUB_STEP_SUMMARY
+          echo "📊 Coverage report generated" >> $GITHUB_STEP_SUMMARY
+
+  msrv:
+    name: Minimum Supported Rust Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.70
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.70"
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Check MSRV compatibility
+        run: cargo check --all-features

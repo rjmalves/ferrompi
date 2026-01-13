@@ -1,0 +1,59 @@
+# Label configuration for auto-labeling PRs based on changed files
+
+# Source code changes
+src:
+  - changed-files:
+    - any-glob-to-any-file: 'src/**/*.rs'
+
+# Documentation changes
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.md'
+      - 'docs/**/*'
+
+# Examples
+examples:
+  - changed-files:
+    - any-glob-to-any-file: 'examples/**/*'
+
+# Tests
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'tests/**/*'
+      - 'src/**/tests.rs'
+
+# Benchmarks
+benchmarks:
+  - changed-files:
+    - any-glob-to-any-file: 'benches/**/*'
+
+# CI/CD
+ci-cd:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**/*'
+      - '.gitlab-ci.yml'
+
+# Dependencies
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+# Build system
+build:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'build.rs'
+      - 'Makefile'
+      - 'CMakeLists.txt'
+
+# C source
+c-code:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'csrc/**/*.c'
+      - 'csrc/**/*.h'

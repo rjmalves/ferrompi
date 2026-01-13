@@ -1,0 +1,196 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run cargo-audit
+        uses: actions-rust-lang/audit@v1
+        with:
+          denyWarnings: false
+
+  verify-version:
+    name: Verify Version Match
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: tag_version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+          echo "Tag version: $TAG"
+
+      - name: Extract version from Cargo.toml
+        id: cargo_version
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Cargo.toml version: $VERSION"
+
+      - name: Verify versions match
+        run: |
+          if [ "${{ steps.tag_version.outputs.version }}" != "${{ steps.cargo_version.outputs.version }}" ]; then
+            echo "❌ Version mismatch!"
+            echo "Tag version: ${{ steps.tag_version.outputs.version }}"
+            echo "Cargo.toml version: ${{ steps.cargo_version.outputs.version }}"
+            exit 1
+          fi
+          echo "✅ Versions match: ${{ steps.cargo_version.outputs.version }}"
+
+  test-linux:
+    name: Test on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
+      - name: Build examples
+        run: cargo build --examples --release
+
+      - name: Run examples
+        run: |
+          for example in hello_world ring allreduce nonblocking persistent_bcast; do
+            echo "Testing example: $example"
+            mpiexec -n 4 ./target/release/examples/$example || exit 1
+          done
+
+  test-macos:
+    name: Test on macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install MPI
+        run: |
+          brew install mpich pkg-config
+
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
+  dry-run:
+    name: Dry-run Publish
+    needs: [audit, verify-version, test-linux, test-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Verify package
+        run: cargo package --allow-dirty
+
+      - name: Dry-run publish
+        run: cargo publish --dry-run --allow-dirty
+
+  publish:
+    name: Publish to crates.io
+    needs: [dry-run]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/ferrompi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+
+      - name: Publish Summary
+        run: |
+          echo "## 🎉 Published to crates.io" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** ferrompi" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${GITHUB_REF#refs/tags/v}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://crates.io/crates/ferrompi" >> $GITHUB_STEP_SUMMARY
+
+  create-release:
+    name: Create GitHub Release
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Try to extract changelog section
+          if [ -f "CHANGELOG.md" ]; then
+            awk "/^## \[$VERSION\]/,/^## \[/" CHANGELOG.md | sed '$d' > release_notes.txt
+          else
+            echo "Release $VERSION" > release_notes.txt
+            echo "" >> release_notes.txt
+            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.txt
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release_notes.txt
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

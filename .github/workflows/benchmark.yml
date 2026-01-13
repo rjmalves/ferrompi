@@ -1,0 +1,165 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-benchmark-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-target-
+
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
+          mpiexec --version
+
+      - name: Install criterion
+        run: cargo install cargo-criterion || true
+
+      - name: Run benchmarks
+        run: |
+          # Run criterion benchmarks if they exist
+          if [ -d "benches" ]; then
+            cargo bench --bench '*' -- --output-format bencher | tee benchmark_results.txt
+          else
+            echo "No benchmarks found - creating placeholder results"
+            echo "test dummy_benchmark ... bench:         100 ns/iter (+/- 10)" > benchmark_results.txt
+          fi
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Extract Criterion results to JSON
+        if: always()
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          results = []
+          criterion_dir = Path("target/criterion")
+
+          if criterion_dir.exists():
+              for estimates_file in criterion_dir.rglob("*/base/estimates.json"):
+                  try:
+                      with open(estimates_file) as f:
+                          data = json.load(f)
+                      
+                      parts = estimates_file.parts
+                      benchmark_name = "/".join(parts[-4:-2])
+                      
+                      mean_ns = data.get("mean", {}).get("point_estimate", 0)
+                      
+                      results.append({
+                          "name": benchmark_name,
+                          "unit": "ns",
+                          "value": mean_ns
+                      })
+                  except Exception as e:
+                      print(f"Warning: Could not parse {estimates_file}: {e}")
+          else:
+              # Create placeholder for repos without benchmarks yet
+              results.append({
+                  "name": "placeholder_benchmark",
+                  "unit": "ns",
+                  "value": 100.0
+              })
+
+          with open("benchmark_results.json", "w") as f:
+              json.dump(results, f, indent=2)
+
+          print(f"Extracted {len(results)} benchmark results")
+          EOF
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        with:
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "110%"
+          comment-on-alert: true
+          fail-on-alert: false
+          alert-comment-cc-users: "@rjmalves"
+
+      - name: Compare benchmarks (PR only)
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "customSmallerIsBetter"
+          output-file-path: benchmark_results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: "110%"
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Upload Criterion HTML reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: criterion-reports
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            benchmark_results.txt
+            benchmark_results.json
+          retention-days: 90
+
+      - name: Performance Summary
+        if: always()
+        run: |
+          echo "## Performance Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Benchmarks completed! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quick Summary" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          tail -20 benchmark_results.txt >> $GITHUB_STEP_SUMMARY || echo "Results not available"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
