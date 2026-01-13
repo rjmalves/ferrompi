@@ -50,6 +50,10 @@ fn main() {
     // when those libraries are not in standard search paths
     
     // Common transitive dependencies that should be handled by the main MPI library
+    // This primarily affects pkg-config detection on Ubuntu/Debian systems
+    // where MPICH's pkg-config file includes all dependencies
+    // MPICH 3.x/4.x and OpenMPI typically include: hwloc, pmix, ucx/ucp/ucs
+    // Note: For non-standard MPI implementations, set MPI_SKIP_LIBS environment variable
     const SKIP_LIBS: &[&str] = &["hwloc", "pmix", "ucp", "ucs", "ucx", "slurm", "amdhip64"];
     
     for lib in &mpi_config.libs {
