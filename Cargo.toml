@@ -41,7 +41,7 @@ cc = "1.0"
 pkg-config = "0.3"
 
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"
 
 [features]
 default = []
