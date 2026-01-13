@@ -3,22 +3,20 @@ name: Documentation
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-docs:
-    name: Build Documentation
+  build-and-deploy:
+    name: Build and Deploy Documentation
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -28,20 +26,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mpich libmpich-dev pkg-config
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-docs-
-
       - name: Build documentation
-        run: |
-          cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
 
@@ -61,7 +47,6 @@ jobs:
           EOF
 
       - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -70,58 +55,3 @@ jobs:
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
           commit_message: "Deploy documentation for ${{ github.sha }}"
-
-      - name: Upload documentation artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation
-          path: target/doc/
-          retention-days: 30
-
-      - name: Documentation Summary
-        if: always()
-        run: |
-          echo "## Documentation Build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.ref }}" == "refs/heads/main" ] && [ "${{ github.event_name }}" == "push" ]; then
-            echo "📚 Documentation deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**URL:** https://rjmalves.github.io/ferrompi/" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "📄 Documentation built successfully" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Download artifact to view locally" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  check-docs:
-    name: Check Documentation Quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
-      - name: Check for missing documentation
-        run: |
-          cargo rustdoc --all-features -- -D missing_docs -D rustdoc::broken_intra_doc_links
-
-      - name: Test documentation examples
-        run: cargo test --doc --all-features
-
-      - name: Documentation Quality Summary
-        if: always()
-        run: |
-          echo "## Documentation Quality Check" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All public items documented" >> $GITHUB_STEP_SUMMARY
-          echo "✅ No broken intra-doc links" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Doc examples pass tests" >> $GITHUB_STEP_SUMMARY

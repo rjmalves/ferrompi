@@ -44,14 +44,14 @@ fn main() -> Result<()> {
     let start_time = Mpi::wtime();
 
     // Each process gets a different random seed based on rank
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Count points inside the quarter circle
     let mut local_inside: u64 = 0;
 
     for _ in 0..samples_per_process {
-        let x: f64 = rng.gen();
-        let y: f64 = rng.gen();
+        let x: f64 = rng.random();
+        let y: f64 = rng.random();
 
         // Check if point is inside quarter circle (x² + y² ≤ 1)
         if x * x + y * y <= 1.0 {

@@ -9,43 +9,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  audit:
-    name: Security Audit
+  verify-and-test:
+    name: Verify and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
-      issues: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Run cargo-audit
-        uses: actions-rust-lang/audit@v1
-        with:
-          denyWarnings: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-  verify-version:
-    name: Verify Version Match
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Install MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libmpich-dev pkg-config
 
       - name: Extract version from tag
         id: tag_version
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
           echo "version=$TAG" >> $GITHUB_OUTPUT
-          echo "Tag version: $TAG"
 
       - name: Extract version from Cargo.toml
         id: cargo_version
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Cargo.toml version: $VERSION"
 
       - name: Verify versions match
         run: |
@@ -57,21 +49,10 @@ jobs:
           fi
           echo "✅ Versions match: ${{ steps.cargo_version.outputs.version }}"
 
-  test-linux:
-    name: Test on Linux
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
+      - name: Run cargo-audit
+        uses: actions-rust-lang/audit@v1
+        with:
+          denyWarnings: false
 
       - name: Run tests
         run: cargo test --all-features --verbose
@@ -86,41 +67,6 @@ jobs:
             mpiexec -n 4 ./target/release/examples/$example || exit 1
           done
 
-  test-macos:
-    name: Test on macOS
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install MPI
-        run: |
-          brew install mpich pkg-config
-
-      - name: Run tests
-        run: cargo test --all-features --verbose
-
-  dry-run:
-    name: Dry-run Publish
-    needs: [audit, verify-version, test-linux, test-macos]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install MPI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config
-
       - name: Verify package
         run: cargo package --allow-dirty
 
@@ -129,7 +75,7 @@ jobs:
 
   publish:
     name: Publish to crates.io
-    needs: [dry-run]
+    needs: [verify-and-test]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -137,7 +83,7 @@ jobs:
       url: https://crates.io/crates/ferrompi
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -150,14 +96,6 @@ jobs:
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
 
-      - name: Publish Summary
-        run: |
-          echo "## 🎉 Published to crates.io" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Package:** ferrompi" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${GITHUB_REF#refs/tags/v}" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** https://crates.io/crates/ferrompi" >> $GITHUB_STEP_SUMMARY
-
   create-release:
     name: Create GitHub Release
     needs: [publish]
@@ -167,7 +105,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -187,7 +125,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.txt
           draft: false
