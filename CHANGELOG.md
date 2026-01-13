@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial CI/CD setup with GitHub Actions
 
 ### Changed
 
@@ -20,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-## [0.1.0] - YYYY-MM-DD
+## [0.1.0] - 2026-01-13
 
 ### Added
 - Initial release
@@ -28,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safe Rust API for MPI operations
 - Examples: hello_world, ring, allreduce, nonblocking, persistent_bcast, pi_monte_carlo
 - Comprehensive documentation
+- Initial CI/CD setup with GitHub Actions
 
 [Unreleased]: https://github.com/rjmalves/ferrompi/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/rjmalves/ferrompi/releases/tag/v0.1.0
