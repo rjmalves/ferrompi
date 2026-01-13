@@ -1,0 +1,49 @@
+[package]
+name = "ferrompi"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rogerio Alves"]
+description = "A thin wrapper for Rust to access the C API of MPICH / OpenMP"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rjmalves/ferrompi"
+keywords = ["mpi", "hpc", "parallel", "distributed"]
+categories = ["science", "concurrency"]
+
+[lib]
+name = "ferrompi"
+path = "src/lib.rs"
+
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+
+[[example]]
+name = "ring"
+path = "examples/ring.rs"
+
+[[example]]
+name = "allreduce"
+path = "examples/allreduce.rs"
+
+[[example]]
+name = "persistent_bcast"
+path = "examples/persistent_bcast.rs"
+
+[[example]]
+name = "nonblocking"
+path = "examples/nonblocking.rs"
+
+[dependencies]
+thiserror = "1.0"
+
+[build-dependencies]
+cc = "1.0"
+pkg-config = "0.3"
+
+[dev-dependencies]
+rand = "0.8"
+
+[features]
+default = []
+# Enable this to get detailed debug output
+debug = []
