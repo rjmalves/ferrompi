@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Error","ReduceOp","ThreadLevel"],"struct":["Communicator","Mpi","PersistentRequest","Request"],"type":["Result"]};
