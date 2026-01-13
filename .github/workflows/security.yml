@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     timeout-minutes: 10
+    continue-on-error: true  # Don't fail CI if dependency graph is not enabled
 
     steps:
       - name: Checkout code
