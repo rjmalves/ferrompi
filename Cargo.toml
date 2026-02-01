@@ -42,7 +42,7 @@ path = "examples/pi_monte_carlo.rs"
 thiserror = "2.0"
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.2"
 pkg-config = "0.3"
 
 [dev-dependencies]
