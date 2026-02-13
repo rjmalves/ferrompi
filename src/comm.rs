@@ -692,6 +692,228 @@ impl Communicator {
     }
 
     // ========================================================================
+    // Generic V-Collectives (variable-count)
+    // ========================================================================
+
+    /// Gather variable amounts of data to the root process.
+    ///
+    /// Each process sends `send.len()` elements. At the root, `recvcounts[i]`
+    /// elements are placed at offset `displs[i]` in `recv` from rank `i`.
+    /// Both `recvcounts` and `displs` must have length equal to the
+    /// communicator size and are only significant at root.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for received data (only significant at root)
+    /// * `recvcounts` - Number of elements received from each rank
+    /// * `displs` - Displacement in `recv` for data from each rank
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// // Each rank sends (rank+1) elements
+    /// let send = vec![rank as f64; (rank + 1) as usize];
+    /// let size = world.size();
+    /// let recvcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = recvcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = recvcounts.iter().sum();
+    /// let mut recv = vec![0.0f64; total as usize];
+    /// world.gatherv(&send, &mut recv, &recvcounts, &displs, 0).unwrap();
+    /// ```
+    pub fn gatherv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+        root: i32,
+    ) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_gatherv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                root,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Scatter variable amounts of data from the root process.
+    ///
+    /// At the root, `sendcounts[i]` elements starting at offset `displs[i]`
+    /// in `send` are sent to rank `i`. Each process receives `recv.len()`
+    /// elements. Both `sendcounts` and `displs` must have length equal to
+    /// the communicator size and are only significant at root.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to scatter (only significant at root)
+    /// * `sendcounts` - Number of elements sent to each rank
+    /// * `displs` - Displacement in `send` for data to each rank
+    /// * `recv` - Buffer for received data
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// let size = world.size();
+    /// let sendcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = sendcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = sendcounts.iter().sum();
+    /// let send = vec![0.0f64; total as usize];
+    /// let mut recv = vec![0.0f64; (rank + 1) as usize];
+    /// world.scatterv(&send, &sendcounts, &displs, &mut recv, 0).unwrap();
+    /// ```
+    pub fn scatterv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        sendcounts: &[i32],
+        displs: &[i32],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_scatterv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                displs.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-gather variable amounts of data (gather and broadcast to all).
+    ///
+    /// Each process sends `send.len()` elements. In `recv`, `recvcounts[i]`
+    /// elements from rank `i` are placed at offset `displs[i]`. Both
+    /// `recvcounts` and `displs` must have length equal to the communicator
+    /// size.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for received data
+    /// * `recvcounts` - Number of elements received from each rank
+    /// * `displs` - Displacement in `recv` for data from each rank
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// let size = world.size();
+    /// let send = vec![rank as f64; (rank + 1) as usize];
+    /// let recvcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = recvcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = recvcounts.iter().sum();
+    /// let mut recv = vec![0.0f64; total as usize];
+    /// world.allgatherv(&send, &mut recv, &recvcounts, &displs).unwrap();
+    /// ```
+    pub fn allgatherv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+    ) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_allgatherv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-to-all with variable counts.
+    ///
+    /// Each process sends `sendcounts[i]` elements starting at offset
+    /// `sdispls[i]` in `send` to rank `i`, and receives `recvcounts[i]`
+    /// elements from rank `i` at offset `rdispls[i]` in `recv`. All four
+    /// arrays must have length equal to the communicator size.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `sendcounts` - Number of elements to send to each rank
+    /// * `sdispls` - Send displacement for each rank
+    /// * `recv` - Receive buffer
+    /// * `recvcounts` - Number of elements to receive from each rank
+    /// * `rdispls` - Receive displacement for each rank
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let sendcounts = vec![1i32; size];
+    /// let sdispls: Vec<i32> = (0..size as i32).collect();
+    /// let recvcounts = vec![1i32; size];
+    /// let rdispls: Vec<i32> = (0..size as i32).collect();
+    /// let send = vec![world.rank() as f64; size];
+    /// let mut recv = vec![0.0f64; size];
+    /// world.alltoallv(&send, &sendcounts, &sdispls, &mut recv, &recvcounts, &rdispls).unwrap();
+    /// ```
+    pub fn alltoallv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        sendcounts: &[i32],
+        sdispls: &[i32],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        rdispls: &[i32],
+    ) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_alltoallv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                sdispls.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                rdispls.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    // ========================================================================
     // Generic Nonblocking Collectives
     // ========================================================================
 

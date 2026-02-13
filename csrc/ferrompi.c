@@ -757,6 +757,66 @@ int ferrompi_scatter(
 }
 
 /* ============================================================
+ * Generic V-Collectives (variable-count)
+ * ============================================================ */
+
+int ferrompi_gatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t root, int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    return MPI_Gatherv(sendbuf, (int)sendcount, dt,
+                       recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                       root, comm);
+}
+
+int ferrompi_scatterv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* displs,
+    void* recvbuf, int64_t recvcount,
+    int32_t datatype_tag, int32_t root, int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    return MPI_Scatterv(sendbuf, (const int*)sendcounts, (const int*)displs, dt,
+                        recvbuf, (int)recvcount, dt,
+                        root, comm);
+}
+
+int ferrompi_allgatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    return MPI_Allgatherv(sendbuf, (int)sendcount, dt,
+                          recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                          comm);
+}
+
+int ferrompi_alltoallv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls,
+    int32_t datatype_tag, int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    return MPI_Alltoallv(sendbuf, (const int*)sendcounts, (const int*)sdispls, dt,
+                         recvbuf, (const int*)recvcounts, (const int*)rdispls, dt,
+                         comm);
+}
+
+/* ============================================================
  * Generic Collective Operations - Nonblocking
  * ============================================================ */
 

@@ -318,6 +318,85 @@ int ferrompi_allgather(const void* sendbuf, int64_t sendcount, void* recvbuf, in
 int ferrompi_scatter(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm);
 
 /* ============================================================
+ * Generic V-Collectives (variable-count)
+ * ============================================================
+ * V-collectives allow each rank to send/receive a different number of
+ * elements. Counts and displacement arrays use int32_t (matching the MPI
+ * standard `int` on all supported platforms).
+ */
+
+/**
+ * Gather variable amounts of data to root (MPI_Gatherv).
+ * @param sendbuf Send buffer
+ * @param sendcount Number of elements to send from this rank
+ * @param recvbuf Receive buffer (significant only at root)
+ * @param recvcounts Array of length size: recvcounts[i] = elements from rank i
+ * @param displs Array of length size: displacement in recvbuf for rank i
+ * @param datatype_tag Datatype tag
+ * @param root Root rank
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_gatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t root, int32_t comm
+);
+
+/**
+ * Scatter variable amounts of data from root (MPI_Scatterv).
+ * @param sendbuf Send buffer (significant only at root)
+ * @param sendcounts Array of length size: sendcounts[i] = elements to rank i
+ * @param displs Array of length size: displacement in sendbuf for rank i
+ * @param recvbuf Receive buffer
+ * @param recvcount Number of elements to receive at this rank
+ * @param datatype_tag Datatype tag
+ * @param root Root rank
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_scatterv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* displs,
+    void* recvbuf, int64_t recvcount,
+    int32_t datatype_tag, int32_t root, int32_t comm
+);
+
+/**
+ * All-gather variable amounts of data (MPI_Allgatherv).
+ * @param sendbuf Send buffer
+ * @param sendcount Number of elements to send from this rank
+ * @param recvbuf Receive buffer
+ * @param recvcounts Array of length size: recvcounts[i] = elements from rank i
+ * @param displs Array of length size: displacement in recvbuf for rank i
+ * @param datatype_tag Datatype tag
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_allgatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t comm
+);
+
+/**
+ * All-to-all with variable counts (MPI_Alltoallv).
+ * @param sendbuf Send buffer
+ * @param sendcounts Array of length size: sendcounts[i] = elements to rank i
+ * @param sdispls Array of length size: send displacement for rank i
+ * @param recvbuf Receive buffer
+ * @param recvcounts Array of length size: recvcounts[i] = elements from rank i
+ * @param rdispls Array of length size: receive displacement for rank i
+ * @param datatype_tag Datatype tag
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_alltoallv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls,
+    int32_t datatype_tag, int32_t comm
+);
+
+/* ============================================================
  * Generic Collective Operations - Nonblocking
  * ============================================================ */
 

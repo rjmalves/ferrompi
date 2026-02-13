@@ -181,6 +181,53 @@ extern "C" {
     ) -> c_int;
 
     // ============================================================
+    // Generic V-Collectives (variable-count)
+    // ============================================================
+
+    pub fn ferrompi_gatherv(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_scatterv(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        displs: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_allgatherv(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_alltoallv(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        sdispls: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        rdispls: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    // ============================================================
     // Generic Collective Operations - Nonblocking
     // ============================================================
 
