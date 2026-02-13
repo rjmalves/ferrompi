@@ -544,3 +544,37 @@ impl<T: MpiDatatype> Drop for LockAllGuard<'_, T> {
         unsafe { ffi::ferrompi_win_unlock_all(self.window.win_handle) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_type_equality() {
+        assert_eq!(LockType::Exclusive, LockType::Exclusive);
+        assert_eq!(LockType::Shared, LockType::Shared);
+        assert_ne!(LockType::Exclusive, LockType::Shared);
+    }
+
+    #[test]
+    fn lock_type_debug() {
+        assert_eq!(format!("{:?}", LockType::Exclusive), "Exclusive");
+        assert_eq!(format!("{:?}", LockType::Shared), "Shared");
+    }
+
+    #[test]
+    #[allow(clippy::clone_on_copy)]
+    fn lock_type_clone_copy() {
+        let original = LockType::Exclusive;
+        let copied = original; // Copy
+        let cloned = original.clone(); // Clone
+        assert_eq!(original, copied);
+        assert_eq!(original, cloned);
+
+        let original = LockType::Shared;
+        let copied = original; // Copy
+        let cloned = original.clone(); // Clone
+        assert_eq!(original, copied);
+        assert_eq!(original, cloned);
+    }
+}

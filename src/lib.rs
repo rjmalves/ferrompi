@@ -338,4 +338,78 @@ impl Drop for Mpi {
 mod tests {
     // Note: MPI tests must be run with mpiexec
     // cargo build --examples && mpiexec -n 4 ./target/debug/examples/hello_world
+
+    use super::*;
+
+    // ── ThreadLevel tests ──────────────────────────────────────────────
+
+    #[test]
+    fn thread_level_ordering() {
+        assert!(ThreadLevel::Single < ThreadLevel::Funneled);
+        assert!(ThreadLevel::Funneled < ThreadLevel::Serialized);
+        assert!(ThreadLevel::Serialized < ThreadLevel::Multiple);
+        // Transitive: smallest < largest
+        assert!(ThreadLevel::Single < ThreadLevel::Multiple);
+    }
+
+    #[test]
+    fn thread_level_equality() {
+        assert_eq!(ThreadLevel::Single, ThreadLevel::Single);
+        assert_eq!(ThreadLevel::Funneled, ThreadLevel::Funneled);
+        assert_eq!(ThreadLevel::Serialized, ThreadLevel::Serialized);
+        assert_eq!(ThreadLevel::Multiple, ThreadLevel::Multiple);
+        assert_ne!(ThreadLevel::Single, ThreadLevel::Multiple);
+        assert_ne!(ThreadLevel::Funneled, ThreadLevel::Serialized);
+    }
+
+    #[test]
+    fn thread_level_repr_values() {
+        assert_eq!(ThreadLevel::Single as i32, 0);
+        assert_eq!(ThreadLevel::Funneled as i32, 1);
+        assert_eq!(ThreadLevel::Serialized as i32, 2);
+        assert_eq!(ThreadLevel::Multiple as i32, 3);
+    }
+
+    #[test]
+    fn thread_level_debug_clone() {
+        let level = ThreadLevel::Funneled;
+        let cloned = level;
+        assert_eq!(format!("{cloned:?}"), "Funneled");
+
+        assert_eq!(format!("{:?}", ThreadLevel::Single), "Single");
+        assert_eq!(format!("{:?}", ThreadLevel::Serialized), "Serialized");
+        assert_eq!(format!("{:?}", ThreadLevel::Multiple), "Multiple");
+    }
+
+    // ── ReduceOp tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn reduce_op_repr_values() {
+        assert_eq!(ReduceOp::Sum as i32, 0);
+        assert_eq!(ReduceOp::Max as i32, 1);
+        assert_eq!(ReduceOp::Min as i32, 2);
+        assert_eq!(ReduceOp::Prod as i32, 3);
+    }
+
+    #[test]
+    fn reduce_op_equality() {
+        assert_eq!(ReduceOp::Sum, ReduceOp::Sum);
+        assert_eq!(ReduceOp::Max, ReduceOp::Max);
+        assert_eq!(ReduceOp::Min, ReduceOp::Min);
+        assert_eq!(ReduceOp::Prod, ReduceOp::Prod);
+        assert_ne!(ReduceOp::Sum, ReduceOp::Max);
+        assert_ne!(ReduceOp::Min, ReduceOp::Prod);
+        assert_ne!(ReduceOp::Sum, ReduceOp::Prod);
+    }
+
+    #[test]
+    fn reduce_op_debug_clone() {
+        let op = ReduceOp::Sum;
+        let cloned = op;
+        assert_eq!(format!("{cloned:?}"), "Sum");
+
+        assert_eq!(format!("{:?}", ReduceOp::Max), "Max");
+        assert_eq!(format!("{:?}", ReduceOp::Min), "Min");
+        assert_eq!(format!("{:?}", ReduceOp::Prod), "Prod");
+    }
 }

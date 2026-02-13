@@ -2877,3 +2877,243 @@ const _: () = {
         assert_send_sync::<Communicator>();
     }
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a Communicator with handle 0 (COMM_WORLD).
+    /// Drop for handle 0 is a no-op, so this is safe without MPI.
+    fn dummy_comm() -> Communicator {
+        Communicator { handle: 0 }
+    }
+
+    #[test]
+    fn reduce_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5]; // different length
+        let result = comm.reduce(&send, &mut recv, ReduceOp::Sum, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn allreduce_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.allreduce(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn scan_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.scan(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn exscan_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.exscan(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn split_type_shared_repr_value_and_traits() {
+        // SplitType::Shared has repr value 0
+        assert_eq!(SplitType::Shared as i32, 0);
+
+        // Clone works (Copy implies Clone)
+        let st = SplitType::Shared;
+        let cloned = st;
+        assert_eq!(cloned, SplitType::Shared);
+
+        // Debug works
+        assert_eq!(format!("{:?}", st), "Shared");
+    }
+
+    #[test]
+    fn communicator_undefined_is_negative_one() {
+        assert_eq!(Communicator::UNDEFINED, -1);
+    }
+
+    #[test]
+    fn communicator_raw_handle_returns_correct_value() {
+        let comm = dummy_comm();
+        assert_eq!(comm.raw_handle(), 0);
+    }
+
+    #[test]
+    fn communicator_clone_preserves_handle() {
+        let comm = dummy_comm();
+        let cloned = comm.clone();
+        assert_eq!(cloned.raw_handle(), comm.raw_handle());
+        // Both have handle 0, so Drop is a no-op for both
+    }
+
+    // Nonblocking collective buffer validation tests (ticket-005)
+
+    #[test]
+    fn iallreduce_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.iallreduce(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn ireduce_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.ireduce(&send, &mut recv, ReduceOp::Sum, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn iscan_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.iscan(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn iexscan_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.iexscan(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    // Persistent collective buffer validation tests (ticket-006)
+
+    #[test]
+    fn allreduce_init_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.allreduce_init(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn reduce_init_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.reduce_init(&send, &mut recv, ReduceOp::Sum, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn scan_init_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.scan_init(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn exscan_init_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5];
+        let result = comm.exscan_init(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoall_init_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 5]; // different length → fires before self.size()
+        let result = comm.alltoall_init(&send, &mut recv);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    // V-collective init array length validation tests (ticket-006)
+
+    #[test]
+    fn gatherv_init_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.gatherv_init(&send, &mut recv, &recvcounts, &displs, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn scatterv_init_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 10];
+        let result = comm.scatterv_init(&send, &sendcounts, &displs, &mut recv, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn allgatherv_init_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.allgatherv_init(&send, &mut recv, &recvcounts, &displs);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoallv_init_mismatched_send_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20, 30];
+        let result = comm.alltoallv_init(
+            &send,
+            &sendcounts,
+            &sdispls,
+            &mut recv,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoallv_init_mismatched_recv_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20, 30];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.alltoallv_init(
+            &send,
+            &sendcounts,
+            &sdispls,
+            &mut recv,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+}

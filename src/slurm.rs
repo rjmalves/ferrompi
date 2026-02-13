@@ -138,5 +138,54 @@ mod tests {
         unsafe {
             std::env::remove_var("SLURM_CPUS_PER_TASK");
         }
+
+        // --- node_name: returns None when neither var is set ---
+        unsafe {
+            std::env::remove_var("SLURM_NODENAME");
+            std::env::remove_var("SLURMD_NODENAME");
+        }
+        assert_eq!(node_name(), None);
+
+        // --- node_name: SLURM_NODENAME takes priority ---
+        unsafe {
+            std::env::set_var("SLURM_NODENAME", "node01");
+        }
+        assert_eq!(node_name(), Some("node01".to_string()));
+        unsafe {
+            std::env::remove_var("SLURM_NODENAME");
+        }
+
+        // --- node_name: falls back to SLURMD_NODENAME ---
+        unsafe {
+            std::env::set_var("SLURMD_NODENAME", "node02");
+        }
+        assert_eq!(node_name(), Some("node02".to_string()));
+        unsafe {
+            std::env::remove_var("SLURMD_NODENAME");
+        }
+
+        // --- node_list: returns None when not set ---
+        unsafe {
+            std::env::remove_var("SLURM_NODELIST");
+        }
+        assert_eq!(node_list(), None);
+
+        // --- node_list: returns value when set ---
+        unsafe {
+            std::env::set_var("SLURM_NODELIST", "node[001-004]");
+        }
+        assert_eq!(node_list(), Some("node[001-004]".to_string()));
+        unsafe {
+            std::env::remove_var("SLURM_NODELIST");
+        }
+
+        // --- local_rank: returns None for non-numeric value ---
+        unsafe {
+            std::env::set_var("SLURM_LOCALID", "not_a_number");
+        }
+        assert_eq!(local_rank(), None);
+        unsafe {
+            std::env::remove_var("SLURM_LOCALID");
+        }
     }
 }

@@ -305,4 +305,145 @@ mod tests {
             "MPI error: invalid rank (class=ERR_RANK, code=6)"
         );
     }
+
+    #[test]
+    #[allow(clippy::clone_on_copy)] // Intentionally exercising Clone derive
+    fn error_class_hash_and_clone() {
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+        set.insert(MpiErrorClass::Success);
+        set.insert(MpiErrorClass::Buffer);
+        set.insert(MpiErrorClass::Raw(42));
+        set.insert(MpiErrorClass::Raw(42)); // duplicate — should not increase len
+        assert_eq!(set.len(), 3);
+
+        // Verify membership
+        assert!(set.contains(&MpiErrorClass::Success));
+        assert!(set.contains(&MpiErrorClass::Buffer));
+        assert!(set.contains(&MpiErrorClass::Raw(42)));
+        assert!(!set.contains(&MpiErrorClass::Comm));
+
+        // Exercise Clone
+        let original = MpiErrorClass::Comm;
+        let cloned = original.clone();
+        assert_eq!(cloned, MpiErrorClass::Comm);
+        assert_eq!(original, cloned);
+
+        // Clone of Raw variant
+        let raw_original = MpiErrorClass::Raw(77);
+        let raw_cloned = raw_original.clone();
+        assert_eq!(raw_cloned, MpiErrorClass::Raw(77));
+    }
+
+    #[test]
+    fn error_class_display_all_variants() {
+        // Comprehensive test of ALL Display implementations.
+        // The existing `error_class_display_formats` test covers Success,
+        // Buffer, Comm, Rank, and Raw. This test covers every variant
+        // exhaustively for completeness.
+        let cases = [
+            (MpiErrorClass::Success, "SUCCESS"),
+            (MpiErrorClass::Buffer, "ERR_BUFFER"),
+            (MpiErrorClass::Count, "ERR_COUNT"),
+            (MpiErrorClass::Type, "ERR_TYPE"),
+            (MpiErrorClass::Tag, "ERR_TAG"),
+            (MpiErrorClass::Comm, "ERR_COMM"),
+            (MpiErrorClass::Rank, "ERR_RANK"),
+            (MpiErrorClass::Request, "ERR_REQUEST"),
+            (MpiErrorClass::Root, "ERR_ROOT"),
+            (MpiErrorClass::Group, "ERR_GROUP"),
+            (MpiErrorClass::Op, "ERR_OP"),
+            (MpiErrorClass::Topology, "ERR_TOPOLOGY"),
+            (MpiErrorClass::Dims, "ERR_DIMS"),
+            (MpiErrorClass::Arg, "ERR_ARG"),
+            (MpiErrorClass::Unknown, "ERR_UNKNOWN"),
+            (MpiErrorClass::Truncate, "ERR_TRUNCATE"),
+            (MpiErrorClass::Other, "ERR_OTHER"),
+            (MpiErrorClass::Intern, "ERR_INTERN"),
+            (MpiErrorClass::InStatus, "ERR_IN_STATUS"),
+            (MpiErrorClass::Pending, "ERR_PENDING"),
+            (MpiErrorClass::Win, "ERR_WIN"),
+            (MpiErrorClass::Info, "ERR_INFO"),
+            (MpiErrorClass::File, "ERR_FILE"),
+            (MpiErrorClass::Raw(100), "ERR_CLASS(100)"),
+        ];
+        for (class, expected) in &cases {
+            assert_eq!(
+                format!("{class}"),
+                *expected,
+                "Display mismatch for {class:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn error_debug_format() {
+        // Exercise Debug derive on Error::InvalidBuffer
+        let err = Error::InvalidBuffer;
+        let debug = format!("{err:?}");
+        assert!(
+            debug.contains("InvalidBuffer"),
+            "Debug output should contain 'InvalidBuffer', got: {debug}"
+        );
+
+        // Exercise Debug on Error::Mpi variant
+        let mpi_err = Error::Mpi {
+            class: MpiErrorClass::Arg,
+            code: 13,
+            message: "invalid argument".to_string(),
+        };
+        let debug = format!("{mpi_err:?}");
+        assert!(
+            debug.contains("Mpi"),
+            "Debug output should contain 'Mpi', got: {debug}"
+        );
+        assert!(
+            debug.contains("Arg"),
+            "Debug output should contain 'Arg', got: {debug}"
+        );
+
+        // Exercise Debug on other Error variants
+        let err = Error::AlreadyInitialized;
+        let debug = format!("{err:?}");
+        assert!(debug.contains("AlreadyInitialized"));
+
+        let err = Error::NotSupported("test op".to_string());
+        let debug = format!("{err:?}");
+        assert!(debug.contains("NotSupported"));
+
+        let err = Error::Internal("internal msg".to_string());
+        let debug = format!("{err:?}");
+        assert!(debug.contains("Internal"));
+    }
+
+    #[test]
+    fn error_mpi_fields_accessible() {
+        // Verify Error::Mpi struct fields are accessible and correct
+        let err = Error::Mpi {
+            class: MpiErrorClass::Topology,
+            code: 11,
+            message: "invalid topology".to_string(),
+        };
+
+        // Pattern-match to access fields
+        if let Error::Mpi {
+            class,
+            code,
+            message,
+        } = &err
+        {
+            assert_eq!(*class, MpiErrorClass::Topology);
+            assert_eq!(*code, 11);
+            assert_eq!(message, "invalid topology");
+        } else {
+            panic!("Expected Error::Mpi variant");
+        }
+
+        // Verify Display uses all three fields
+        let display = format!("{err}");
+        assert!(display.contains("invalid topology"));
+        assert!(display.contains("ERR_TOPOLOGY"));
+        assert!(display.contains("11"));
+    }
 }

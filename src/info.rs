@@ -208,3 +208,76 @@ impl Drop for Info {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Null info object tests ---
+
+    #[test]
+    fn null_info_raw_handle() {
+        let info = Info::null();
+        assert_eq!(info.raw_handle(), -1);
+        // Drop is a no-op for null info (is_null == true)
+    }
+
+    #[test]
+    fn null_info_set_returns_error() {
+        let info = Info::null();
+        let result = info.set("key", "value");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("MPI_INFO_NULL"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn null_info_get_returns_error() {
+        let info = Info::null();
+        let result = info.get("key");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("MPI_INFO_NULL"), "got: {err_msg}");
+    }
+
+    // --- CString null-byte rejection tests ---
+    //
+    // We construct Info { handle: -1, is_null: false } to reach the CString path.
+    // Drop check: !is_null (true) && handle >= 0 (-1 is not >= 0) → no FFI call.
+
+    #[test]
+    fn set_key_with_null_byte_returns_error() {
+        let info = Info {
+            handle: -1,
+            is_null: false,
+        };
+        let result = info.set("key\0bad", "value");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("null byte"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn set_value_with_null_byte_returns_error() {
+        let info = Info {
+            handle: -1,
+            is_null: false,
+        };
+        let result = info.set("key", "value\0bad");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("null byte"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn get_key_with_null_byte_returns_error() {
+        let info = Info {
+            handle: -1,
+            is_null: false,
+        };
+        let result = info.get("key\0bad");
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("null byte"), "got: {err_msg}");
+    }
+}

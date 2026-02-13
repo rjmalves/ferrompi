@@ -141,4 +141,29 @@ mod tests {
         assert_mpi_datatype::<u32>();
         assert_mpi_datatype::<u64>();
     }
+
+    #[test]
+    fn datatype_tag_debug_format() {
+        assert_eq!(format!("{:?}", DatatypeTag::F32), "F32");
+        assert_eq!(format!("{:?}", DatatypeTag::F64), "F64");
+        assert_eq!(format!("{:?}", DatatypeTag::I32), "I32");
+        assert_eq!(format!("{:?}", DatatypeTag::I64), "I64");
+        assert_eq!(format!("{:?}", DatatypeTag::U8), "U8");
+        assert_eq!(format!("{:?}", DatatypeTag::U32), "U32");
+        assert_eq!(format!("{:?}", DatatypeTag::U64), "U64");
+    }
+
+    #[test]
+    fn datatype_tag_clone_hash() {
+        use std::collections::HashSet;
+        let tag = DatatypeTag::F64;
+        let cloned = tag;
+        assert_eq!(cloned, DatatypeTag::F64);
+
+        let mut set = HashSet::new();
+        set.insert(DatatypeTag::F32);
+        set.insert(DatatypeTag::F64);
+        set.insert(DatatypeTag::F32); // duplicate
+        assert_eq!(set.len(), 2);
+    }
 }
