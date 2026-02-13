@@ -58,6 +58,33 @@
 //! - **Nonblocking collectives**: ibcast, iallreduce with request handles
 //! - **Persistent collectives** (MPI 4.0+): `bcast_init`, `allreduce_init`, etc.
 //! - **Rich error handling**: [`MpiErrorClass`] categorization with messages from the MPI runtime
+//!
+//! ## Thread Safety
+//!
+//! [`Communicator`] is `Send + Sync` to support hybrid MPI + threads programs
+//! (e.g., MPI between nodes, `std::thread::scope` within a node).
+//!
+//! The actual thread-safety guarantees depend on the thread level requested
+//! at initialization:
+//!
+//! | Thread Level | Who can call MPI | Synchronization |
+//! |--------------|------------------|-----------------|
+//! | [`ThreadLevel::Single`] | Main thread only | N/A |
+//! | [`ThreadLevel::Funneled`] | Main thread only | N/A |
+//! | [`ThreadLevel::Serialized`] | Any thread | User must serialize |
+//! | [`ThreadLevel::Multiple`] | Any thread | None needed |
+//!
+//! ```no_run
+//! use ferrompi::{Mpi, ThreadLevel};
+//!
+//! // Request serialized thread support for hybrid MPI + threads
+//! let mpi = Mpi::init_thread(ThreadLevel::Funneled).unwrap();
+//! assert!(mpi.thread_level() >= ThreadLevel::Funneled);
+//! ```
+//!
+//! [`Mpi`] itself is `!Send + !Sync` — MPI initialization and finalization
+//! must occur on the same thread. Only [`Communicator`] handles (and the
+//! operations on them) may cross thread boundaries.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

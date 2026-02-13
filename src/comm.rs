@@ -10,7 +10,6 @@ use crate::persistent::PersistentRequest;
 use crate::request::Request;
 use crate::status::Status;
 use crate::ReduceOp;
-use std::marker::PhantomData;
 
 /// Split types for [`Communicator::split_type`].
 ///
@@ -29,6 +28,24 @@ pub enum SplitType {
 /// This type wraps an MPI communicator handle and provides safe methods for
 /// collective and point-to-point communication operations.
 ///
+/// # Thread Safety
+///
+/// `Communicator` is `Send + Sync`, matching the thread-safety model of
+/// C/Fortran MPI. The actual thread-safety guarantees depend on the
+/// thread level provided by [`Mpi::init_thread()`](crate::Mpi::init_thread):
+///
+/// - [`ThreadLevel::Single`](crate::ThreadLevel::Single) /
+///   [`Funneled`](crate::ThreadLevel::Funneled): MPI calls only from main thread
+/// - [`ThreadLevel::Serialized`](crate::ThreadLevel::Serialized): MPI calls
+///   from any thread, but serialized by the user (e.g., via a `Mutex`)
+/// - [`ThreadLevel::Multiple`](crate::ThreadLevel::Multiple): MPI calls from
+///   any thread concurrently without external synchronization
+///
+/// For hybrid MPI + threads programs, request at least
+/// [`ThreadLevel::Funneled`](crate::ThreadLevel::Funneled) (master thread
+/// makes MPI calls) or [`ThreadLevel::Serialized`](crate::ThreadLevel::Serialized)
+/// (any thread, but only one at a time).
+///
 /// # Example
 ///
 /// ```no_run
@@ -42,9 +59,17 @@ pub enum SplitType {
 #[derive(Clone)]
 pub struct Communicator {
     handle: i32,
-    /// Marker to prevent Send/Sync (MPI communicators are not thread-safe)
-    _marker: PhantomData<*mut ()>,
 }
+
+// SAFETY: Communicator handles are integer indices into a C-side table.
+// The C MPI library manages its own thread safety based on the thread level
+// requested via MPI_Init_thread. Sending a Communicator to another thread is
+// safe because MPI_Comm operations are defined to be callable from any thread
+// when the appropriate thread level (Serialized or Multiple) was requested.
+// Users must ensure they requested sufficient thread support and serialize
+// access themselves when using ThreadLevel::Serialized.
+unsafe impl Send for Communicator {}
+unsafe impl Sync for Communicator {}
 
 impl Communicator {
     /// Constant for opting out of a communicator split.
@@ -57,7 +82,6 @@ impl Communicator {
     pub(crate) fn world() -> Self {
         Communicator {
             handle: unsafe { ffi::ferrompi_comm_world() },
-            _marker: PhantomData,
         }
     }
 
@@ -98,10 +122,7 @@ impl Communicator {
         let mut new_handle: i32 = 0;
         let ret = unsafe { ffi::ferrompi_comm_dup(self.handle, &mut new_handle) };
         Error::check(ret)?;
-        Ok(Communicator {
-            handle: new_handle,
-            _marker: PhantomData,
-        })
+        Ok(Communicator { handle: new_handle })
     }
 
     /// Split this communicator into sub-communicators based on color and key.
@@ -130,10 +151,7 @@ impl Communicator {
         if new_handle < 0 {
             Ok(None)
         } else {
-            Ok(Some(Communicator {
-                handle: new_handle,
-                _marker: PhantomData,
-            }))
+            Ok(Some(Communicator { handle: new_handle }))
         }
     }
 
@@ -165,10 +183,7 @@ impl Communicator {
         if new_handle < 0 {
             Ok(None)
         } else {
-            Ok(Some(Communicator {
-                handle: new_handle,
-                _marker: PhantomData,
-            }))
+            Ok(Some(Communicator { handle: new_handle }))
         }
     }
 
@@ -1615,5 +1630,12 @@ impl Drop for Communicator {
     }
 }
 
-// Communicators are not Send or Sync by default
-// (MPI communicators have thread-safety requirements)
+// Compile-time assertions: Communicator must be Send + Sync
+const _: () = {
+    #[allow(dead_code)]
+    fn assert_send_sync<T: Send + Sync>() {}
+    #[allow(dead_code)]
+    fn check() {
+        assert_send_sync::<Communicator>();
+    }
+};
