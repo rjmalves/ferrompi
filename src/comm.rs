@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::ffi;
 use crate::persistent::PersistentRequest;
 use crate::request::Request;
+use crate::status::Status;
 use crate::ReduceOp;
 use std::marker::PhantomData;
 
@@ -432,6 +433,122 @@ impl Communicator {
         };
         Error::check(ret)?;
         Ok((actual_source, actual_tag, actual_count))
+    }
+
+    // ========================================================================
+    // Message Probing
+    // ========================================================================
+
+    /// Blocking probe for an incoming message.
+    ///
+    /// Waits until a matching message is available and returns status
+    /// information (source rank, tag, element count) without actually
+    /// receiving the message. This is useful for determining the size of an
+    /// incoming message before allocating a receive buffer.
+    ///
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
+    ///
+    /// The type parameter `T` determines the MPI datatype used by
+    /// `MPI_Get_count` to compute the element count in the returned
+    /// [`Status`].
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Source rank to match (or -1 for any source)
+    /// * `tag` - Message tag to match (or -1 for any tag)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // Probe for any incoming f64 message
+    /// let status = world.probe::<f64>(-1, -1).unwrap();
+    /// // Allocate a buffer of exactly the right size
+    /// let mut buf = vec![0.0f64; status.count as usize];
+    /// world.recv(&mut buf, status.source, status.tag).unwrap();
+    /// ```
+    pub fn probe<T: MpiDatatype>(&self, source: i32, tag: i32) -> Result<Status> {
+        let mut actual_source: i32 = 0;
+        let mut actual_tag: i32 = 0;
+        let mut count: i64 = 0;
+
+        let ret = unsafe {
+            ffi::ferrompi_probe(
+                source,
+                tag,
+                self.handle,
+                &mut actual_source,
+                &mut actual_tag,
+                &mut count,
+                T::TAG as i32,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Status {
+            source: actual_source,
+            tag: actual_tag,
+            count,
+        })
+    }
+
+    /// Nonblocking probe for an incoming message.
+    ///
+    /// Checks whether a matching message is available without blocking.
+    /// Returns `Some(Status)` if a message is available, `None` otherwise.
+    ///
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
+    ///
+    /// The type parameter `T` determines the MPI datatype used by
+    /// `MPI_Get_count` to compute the element count in the returned
+    /// [`Status`].
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Source rank to match (or -1 for any source)
+    /// * `tag` - Message tag to match (or -1 for any tag)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // Poll for an incoming f64 message without blocking
+    /// if let Some(status) = world.iprobe::<f64>(-1, -1).unwrap() {
+    ///     let mut buf = vec![0.0f64; status.count as usize];
+    ///     world.recv(&mut buf, status.source, status.tag).unwrap();
+    /// }
+    /// ```
+    pub fn iprobe<T: MpiDatatype>(&self, source: i32, tag: i32) -> Result<Option<Status>> {
+        let mut flag: i32 = 0;
+        let mut actual_source: i32 = 0;
+        let mut actual_tag: i32 = 0;
+        let mut count: i64 = 0;
+
+        let ret = unsafe {
+            ffi::ferrompi_iprobe(
+                source,
+                tag,
+                self.handle,
+                &mut flag,
+                &mut actual_source,
+                &mut actual_tag,
+                &mut count,
+                T::TAG as i32,
+            )
+        };
+        Error::check(ret)?;
+        if flag != 0 {
+            Ok(Some(Status {
+                source: actual_source,
+                tag: actual_tag,
+                count,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     // ========================================================================

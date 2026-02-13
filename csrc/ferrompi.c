@@ -616,6 +616,58 @@ int ferrompi_sendrecv(
 }
 
 /* ============================================================
+ * Message Probing
+ * ============================================================ */
+
+int ferrompi_probe(int32_t source, int32_t tag, int32_t comm_handle,
+                   int32_t* actual_source, int32_t* actual_tag,
+                   int64_t* count, int32_t datatype_tag) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+
+    int mpi_source = (source == -1) ? MPI_ANY_SOURCE : source;
+    int mpi_tag = (tag == -1) ? MPI_ANY_TAG : tag;
+
+    MPI_Status status;
+    int ret = MPI_Probe(mpi_source, mpi_tag, comm, &status);
+    if (ret == MPI_SUCCESS) {
+        *actual_source = status.MPI_SOURCE;
+        *actual_tag = status.MPI_TAG;
+        int cnt;
+        MPI_Get_count(&status, dt, &cnt);
+        *count = (int64_t)cnt;
+    }
+    return ret;
+}
+
+int ferrompi_iprobe(int32_t source, int32_t tag, int32_t comm_handle,
+                    int32_t* flag, int32_t* actual_source, int32_t* actual_tag,
+                    int64_t* count, int32_t datatype_tag) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+
+    int mpi_source = (source == -1) ? MPI_ANY_SOURCE : source;
+    int mpi_tag = (tag == -1) ? MPI_ANY_TAG : tag;
+
+    MPI_Status status;
+    int f;
+    int ret = MPI_Iprobe(mpi_source, mpi_tag, comm, &f, &status);
+    if (ret == MPI_SUCCESS) {
+        *flag = f;
+        if (f) {
+            *actual_source = status.MPI_SOURCE;
+            *actual_tag = status.MPI_TAG;
+            int cnt;
+            MPI_Get_count(&status, dt, &cnt);
+            *count = (int64_t)cnt;
+        }
+    }
+    return ret;
+}
+
+/* ============================================================
  * Generic Collective Operations - Blocking
  * ============================================================ */
 

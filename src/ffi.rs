@@ -113,6 +113,31 @@ extern "C" {
     ) -> c_int;
 
     // ============================================================
+    // Message Probing
+    // ============================================================
+
+    pub fn ferrompi_probe(
+        source: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        actual_source: *mut int32_t,
+        actual_tag: *mut int32_t,
+        count: *mut int64_t,
+        datatype_tag: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iprobe(
+        source: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        flag: *mut int32_t,
+        actual_source: *mut int32_t,
+        actual_tag: *mut int32_t,
+        count: *mut int64_t,
+        datatype_tag: int32_t,
+    ) -> c_int;
+
+    // ============================================================
     // Generic Collective Operations - Blocking
     // ============================================================
 

@@ -79,6 +79,7 @@ mod ffi;
 mod info;
 mod persistent;
 mod request;
+mod status;
 
 pub use comm::{Communicator, SplitType};
 pub use datatype::{DatatypeTag, MpiDatatype};
@@ -86,6 +87,7 @@ pub use error::{Error, MpiErrorClass, Result};
 pub use info::Info;
 pub use persistent::PersistentRequest;
 pub use request::Request;
+pub use status::Status;
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};

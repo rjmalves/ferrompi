@@ -293,6 +293,65 @@ int ferrompi_sendrecv(
 );
 
 /* ============================================================
+ * Message Probing
+ * ============================================================ */
+
+/**
+ * Blocking probe for an incoming message (MPI_Probe).
+ *
+ * Waits until a matching message is available and returns status
+ * information (source, tag, element count) without actually receiving
+ * the message. Use this to determine the size of an incoming message
+ * before allocating a receive buffer.
+ *
+ * @param source Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm Communicator handle
+ * @param actual_source Output: actual source rank
+ * @param actual_tag Output: actual tag
+ * @param count Output: number of elements (via MPI_Get_count)
+ * @param datatype_tag Datatype tag for MPI_Get_count
+ * @return MPI error code
+ */
+int ferrompi_probe(
+    int32_t source,
+    int32_t tag,
+    int32_t comm,
+    int32_t* actual_source,
+    int32_t* actual_tag,
+    int64_t* count,
+    int32_t datatype_tag
+);
+
+/**
+ * Nonblocking probe for an incoming message (MPI_Iprobe).
+ *
+ * Checks whether a matching message is available without blocking.
+ * If a message is available, sets flag=1 and populates the status
+ * fields; otherwise sets flag=0.
+ *
+ * @param source Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm Communicator handle
+ * @param flag Output: 1 if a message is available, 0 otherwise
+ * @param actual_source Output: actual source rank (valid only when flag=1)
+ * @param actual_tag Output: actual tag (valid only when flag=1)
+ * @param count Output: number of elements (valid only when flag=1)
+ * @param datatype_tag Datatype tag for MPI_Get_count
+ * @return MPI error code
+ */
+int ferrompi_iprobe(
+    int32_t source,
+    int32_t tag,
+    int32_t comm,
+    int32_t* flag,
+    int32_t* actual_source,
+    int32_t* actual_tag,
+    int64_t* count,
+    int32_t datatype_tag
+);
+
+/* ============================================================
  * Generic Collective Operations - Blocking
  * ============================================================ */
 
