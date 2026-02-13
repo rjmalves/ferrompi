@@ -159,6 +159,16 @@ extern "C" {
         comm: int32_t,
     ) -> c_int;
 
+    pub fn ferrompi_reduce_inplace(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        root: int32_t,
+        is_root: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
     pub fn ferrompi_allreduce(
         sendbuf: *const c_void,
         recvbuf: *mut c_void,

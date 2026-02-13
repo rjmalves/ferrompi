@@ -630,6 +630,83 @@ impl Communicator {
         Error::check(ret)
     }
 
+    /// Reduce a single scalar value to the root process.
+    ///
+    /// Convenience method that wraps [`reduce`](Self::reduce) for a single element.
+    /// The result is only meaningful at the root process.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The scalar value to contribute from this process
+    /// * `op` - Reduction operation
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let sum = world.reduce_scalar(world.rank() as f64, ReduceOp::Sum, 0).unwrap();
+    /// if world.rank() == 0 {
+    ///     println!("Sum of all ranks: {sum}");
+    /// }
+    /// ```
+    pub fn reduce_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp, root: i32) -> Result<T> {
+        let send = [value];
+        let mut recv = [value]; // placeholder, will be overwritten at root
+        self.reduce(&send, &mut recv, op, root)?;
+        Ok(recv[0])
+    }
+
+    /// In-place reduce to the root process.
+    ///
+    /// At root: `data` is both input and output (the reduction result overwrites
+    /// the input).
+    /// At non-root: `data` is the send buffer only.
+    ///
+    /// This avoids allocating a separate receive buffer at the root, which is
+    /// useful for large reductions where memory is a concern.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Buffer to reduce (input on all ranks, output only at root)
+    /// * `op` - Reduction operation
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut data = vec![world.rank() as f64; 10];
+    /// world.reduce_inplace(&mut data, ReduceOp::Sum, 0).unwrap();
+    /// if world.rank() == 0 {
+    ///     println!("Reduced result: {:?}", &data[..3]);
+    /// }
+    /// ```
+    pub fn reduce_inplace<T: MpiDatatype>(
+        &self,
+        data: &mut [T],
+        op: ReduceOp,
+        root: i32,
+    ) -> Result<()> {
+        let is_root = if self.rank() == root { 1i32 } else { 0i32 };
+        let ret = unsafe {
+            ffi::ferrompi_reduce_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                root,
+                is_root,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
     /// All-reduce values (reduce and broadcast result to all).
     ///
     /// # Arguments
@@ -1496,6 +1573,36 @@ impl Communicator {
             ));
         }
         Ok(PersistentRequest::new(request_handle))
+    }
+
+    // ========================================================================
+    // Process Control
+    // ========================================================================
+
+    /// Abort MPI execution across all processes in this communicator.
+    ///
+    /// This function terminates all processes associated with the communicator.
+    /// It calls `MPI_Abort` and then exits the process. This function never
+    /// returns.
+    ///
+    /// # Arguments
+    ///
+    /// * `errorcode` - Error code to return to the invoking environment
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// if world.rank() == 0 {
+    ///     // Fatal error detected, abort all processes
+    ///     world.abort(1);
+    /// }
+    /// ```
+    pub fn abort(&self, errorcode: i32) -> ! {
+        unsafe { ffi::ferrompi_abort(self.handle, errorcode) };
+        std::process::exit(errorcode)
     }
 }
 

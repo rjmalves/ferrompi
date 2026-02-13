@@ -724,6 +724,23 @@ int ferrompi_allreduce(
     return MPI_Allreduce(sendbuf, recvbuf, (int)count, dt, mpi_op, comm);
 }
 
+int ferrompi_reduce_inplace(void* buf, int64_t count, int32_t datatype_tag,
+                            int32_t op, int32_t root, int32_t is_root,
+                            int32_t comm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    MPI_Op mpi_op = get_op(op);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+
+    if (is_root) {
+        /* Root uses MPI_IN_PLACE as sendbuf; buf is both input and output */
+        return MPI_Reduce(MPI_IN_PLACE, buf, (int)count, dt, mpi_op, root, comm);
+    } else {
+        /* Non-root sends buf, recvbuf is ignored */
+        return MPI_Reduce(buf, NULL, (int)count, dt, mpi_op, root, comm);
+    }
+}
+
 int ferrompi_allreduce_inplace(void* buf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm_handle) {
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);

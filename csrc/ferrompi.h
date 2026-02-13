@@ -361,6 +361,23 @@ int ferrompi_bcast(void* buf, int64_t count, int32_t datatype_tag, int32_t root,
 /** Reduce (generic) */
 int ferrompi_reduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t root, int32_t comm);
 
+/**
+ * In-place reduce to root (generic).
+ *
+ * At root (is_root != 0): buf is both input and output (uses MPI_IN_PLACE as sendbuf).
+ * At non-root (is_root == 0): buf is the send buffer, recvbuf is ignored.
+ *
+ * @param buf Data buffer (input on all ranks, output only at root)
+ * @param count Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param op Reduction operation
+ * @param root Root rank
+ * @param is_root Non-zero if this process is the root
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_reduce_inplace(void* buf, int64_t count, int32_t datatype_tag, int32_t op, int32_t root, int32_t is_root, int32_t comm);
+
 /** All-reduce (generic) */
 int ferrompi_allreduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
 
