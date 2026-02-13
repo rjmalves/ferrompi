@@ -80,6 +80,8 @@ mod info;
 mod persistent;
 mod request;
 mod status;
+#[cfg(feature = "rma")]
+mod window;
 
 pub use comm::{Communicator, SplitType};
 pub use datatype::{DatatypeTag, MpiDatatype};
@@ -88,6 +90,8 @@ pub use info::Info;
 pub use persistent::PersistentRequest;
 pub use request::Request;
 pub use status::Status;
+#[cfg(feature = "rma")]
+pub use window::{LockAllGuard, LockGuard, LockType, SharedWindow};
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
