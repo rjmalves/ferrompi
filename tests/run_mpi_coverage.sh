@@ -198,7 +198,9 @@ echo -e "${BOLD}═════════════════════�
 # Core test examples
 run_test test_lifecycle 2
 run_test test_collectives
+run_test test_blocking_extra
 run_test test_nonblocking
+run_test test_p2p_extra
 run_test test_comm_split 4
 
 # RMA / shared memory tests (only if rma or numa feature is enabled)

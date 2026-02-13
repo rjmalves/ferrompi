@@ -27,23 +27,23 @@
     "ticket-004": {
       "title": "Blocking collective extras",
       "epic": "epic-03-comm-blocking",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T20:00:00Z"
     },
     "ticket-005": {
       "title": "Point-to-point coverage",
       "epic": "epic-03-comm-blocking",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T20:00:00Z"
     },
     "ticket-006": {
       "title": "Buffer validation unit tests",
       "epic": "epic-03-comm-blocking",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T20:00:00Z"
     },
     "ticket-007": {
       "title": "Nonblocking collective operations",

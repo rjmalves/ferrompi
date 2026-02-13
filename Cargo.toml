@@ -72,6 +72,14 @@ name = "test_comm_split"
 path = "examples/test_comm_split.rs"
 
 [[example]]
+name = "test_p2p_extra"
+path = "examples/test_p2p_extra.rs"
+
+[[example]]
+name = "test_blocking_extra"
+path = "examples/test_blocking_extra.rs"
+
+[[example]]
 name = "test_lifecycle"
 path = "examples/test_lifecycle.rs"
 

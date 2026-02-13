@@ -11,9 +11,9 @@
 | 001    | Infrastructure | Coverage runner script            | `completed` | —            |
 | 002    | Infrastructure | Verify baseline coverage          | `completed` | 001          |
 | 003    | Lifecycle      | MPI lifecycle test example        | `completed` | 001          |
-| 004    | Blocking       | Blocking collective extras        | `pending`   | 001, 002     |
-| 005    | Blocking       | Point-to-point coverage           | `pending`   | 001, 002     |
-| 006    | Blocking       | Buffer validation unit tests      | `pending`   | 002          |
+| 004    | Blocking       | Blocking collective extras        | `completed` | 001, 002     |
+| 005    | Blocking       | Point-to-point coverage           | `completed` | 001, 002     |
+| 006    | Blocking       | Buffer validation unit tests      | `completed` | 002          |
 | 007    | Nonblocking    | Nonblocking collective operations | `pending`   | 001          |
 | 008    | Nonblocking    | Request coverage extras           | `pending`   | 001, 002     |
 | 009    | Persistent     | Persistent collective operations  | `pending`   | 001          |
