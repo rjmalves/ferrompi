@@ -3,7 +3,6 @@
 //! Exercises Communicator::split() to create sub-communicators by color,
 //! verifies rank/size in sub-communicators, and tests collective operations
 //! within sub-communicators. Also tests split_type and split_shared.
-//! A custom panic hook calls `std::process::abort()` to prevent MPI hangs.
 //!
 //! Run with: mpiexec -n 4 ./target/debug/examples/test_comm_split
 
@@ -11,20 +10,21 @@ use ferrompi::{Communicator, Mpi, ReduceOp, SplitType};
 
 fn main() {
     let mpi = Mpi::init().expect("MPI init failed");
-
-    // Install a panic hook that aborts the process to prevent MPI deadlocks.
-    // NOTE: Must be installed AFTER Mpi::init() to avoid interfering with
-    // MPI runtime initialization on some implementations (e.g., MPICH 4.2.0).
-    std::panic::set_hook(Box::new(|info| {
-        eprintln!("PANIC: {info}");
-        std::process::abort();
-    }));
-
     let world = mpi.world();
     let rank = world.rank();
     let size = world.size();
 
-    assert!(size >= 4, "test_comm_split requires at least 4 processes");
+    // Diagnostic output for CI debugging (MPICH 4.2.0 investigation)
+    eprintln!(
+        "[DIAG] test_comm_split: rank={rank}, size={size}, handle={}, pid={}",
+        world.raw_handle(),
+        std::process::id()
+    );
+
+    assert!(
+        size >= 4,
+        "test_comm_split requires at least 4 processes, got {size}"
+    );
 
     // ========================================================================
     // Test 1: Even/odd split

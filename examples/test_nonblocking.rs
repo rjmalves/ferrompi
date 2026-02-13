@@ -2,7 +2,6 @@
 //!
 //! Exercises isend/irecv with Request::wait(), sendrecv, probe/iprobe,
 //! and blocking send/recv. Each operation is verified with assertions.
-//! A custom panic hook calls `std::process::abort()` to prevent MPI hangs.
 //!
 //! Run with: mpiexec -n 4 ./target/debug/examples/test_nonblocking
 
@@ -10,20 +9,21 @@ use ferrompi::Mpi;
 
 fn main() {
     let mpi = Mpi::init().expect("MPI init failed");
-
-    // Install a panic hook that aborts the process to prevent MPI deadlocks.
-    // NOTE: Must be installed AFTER Mpi::init() to avoid interfering with
-    // MPI runtime initialization on some implementations (e.g., MPICH 4.2.0).
-    std::panic::set_hook(Box::new(|info| {
-        eprintln!("PANIC: {info}");
-        std::process::abort();
-    }));
-
     let world = mpi.world();
     let rank = world.rank();
     let size = world.size();
 
-    assert!(size >= 2, "test_nonblocking requires at least 2 processes");
+    // Diagnostic output for CI debugging (MPICH 4.2.0 investigation)
+    eprintln!(
+        "[DIAG] test_nonblocking: rank={rank}, size={size}, handle={}, pid={}",
+        world.raw_handle(),
+        std::process::id()
+    );
+
+    assert!(
+        size >= 2,
+        "test_nonblocking requires at least 2 processes, got {size}"
+    );
 
     // ========================================================================
     // Test 1: isend / irecv with Request::wait()
