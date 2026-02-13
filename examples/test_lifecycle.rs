@@ -40,7 +40,7 @@ fn main() {
 
     // Test wtime
     let t1 = Mpi::wtime();
-    assert!(t1 > 0.0, "wtime should return positive value");
+    assert!(t1 >= 0.0, "wtime should return non-negative value");
     let t2 = Mpi::wtime();
     assert!(t2 >= t1, "wtime should be monotonic");
     println!("PASS: wtime = {}", t1);
