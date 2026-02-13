@@ -127,7 +127,6 @@ static void free_request(int64_t handle) {
 }
 
 // Allocate a window handle
-__attribute__((unused))
 static int32_t alloc_win(MPI_Win win) {
     for (int i = 0; i < MAX_WINDOWS; i++) {
         int idx = (next_win_hint + i) % MAX_WINDOWS;
@@ -142,7 +141,6 @@ static int32_t alloc_win(MPI_Win win) {
 }
 
 // Get MPI_Win from handle
-__attribute__((unused))
 static MPI_Win get_win(int32_t handle) {
     if (handle < 0 || handle >= MAX_WINDOWS || !win_used[handle]) {
         return MPI_WIN_NULL;
@@ -151,7 +149,6 @@ static MPI_Win get_win(int32_t handle) {
 }
 
 // Get MPI_Win pointer from handle (for operations that modify the win)
-__attribute__((unused))
 static MPI_Win* get_win_ptr(int32_t handle) {
     if (handle < 0 || handle >= MAX_WINDOWS || !win_used[handle]) {
         return NULL;
@@ -160,7 +157,6 @@ static MPI_Win* get_win_ptr(int32_t handle) {
 }
 
 // Free a window handle
-__attribute__((unused))
 static void free_win(int32_t handle) {
     if (handle >= 0 && handle < MAX_WINDOWS) {
         win_table[handle] = MPI_WIN_NULL;
@@ -1363,6 +1359,71 @@ int ferrompi_request_free(int64_t request_handle) {
     free_request(request_handle);
     return MPI_SUCCESS;
 }
+
+/* ============================================================
+ * RMA Window Operations (MPI 3.0+)
+ * ============================================================ */
+
+#if MPI_VERSION >= 3
+
+int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_handle,
+                                  int32_t comm_handle, void** baseptr, int32_t* win_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Info info = (info_handle < 0) ? MPI_INFO_NULL : get_info(info_handle);
+    MPI_Win win;
+    int ret = MPI_Win_allocate_shared((MPI_Aint)size, disp_unit, info, comm, baseptr, &win);
+    if (ret == MPI_SUCCESS) {
+        *win_handle = alloc_win(win);
+        if (*win_handle < 0) {
+            MPI_Win_free(&win);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_win_shared_query(int32_t win_handle, int32_t rank,
+                               int64_t* size, int32_t* disp_unit, void** baseptr) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Aint sz;
+    int du;
+    int ret = MPI_Win_shared_query(win, rank, &sz, &du, baseptr);
+    if (ret == MPI_SUCCESS) {
+        *size = (int64_t)sz;
+        *disp_unit = (int32_t)du;
+    }
+    return ret;
+}
+
+int ferrompi_win_free(int32_t win_handle) {
+    MPI_Win* winp = get_win_ptr(win_handle);
+    if (!winp) return MPI_SUCCESS;
+    int ret = MPI_Win_free(winp);
+    free_win(win_handle);
+    return ret;
+}
+
+#else /* MPI_VERSION < 3 */
+
+int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_handle,
+                                  int32_t comm_handle, void** baseptr, int32_t* win_handle) {
+    (void)size; (void)disp_unit; (void)info_handle; (void)comm_handle; (void)baseptr; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_shared_query(int32_t win_handle, int32_t rank,
+                               int64_t* size, int32_t* disp_unit, void** baseptr) {
+    (void)win_handle; (void)rank; (void)size; (void)disp_unit; (void)baseptr;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_free(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+#endif /* MPI_VERSION >= 3 */
 
 /* ============================================================
  * Utility Functions

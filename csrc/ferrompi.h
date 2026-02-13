@@ -667,17 +667,56 @@ int ferrompi_start(int64_t request);
 int ferrompi_startall(int64_t count, int64_t* requests);
 
 /* ============================================================
- * RMA Window Operations (to be implemented in tickets 015-018)
+ * RMA Window Operations (MPI 3.0+)
  * ============================================================
  *
  * Window handle table supports up to 256 concurrent MPI_Win objects.
- * Functions will be added for:
- * - MPI_Win_allocate_shared
- * - MPI_Win_shared_query
- * - MPI_Win_fence / MPI_Win_lock / MPI_Win_lock_all
- * - MPI_Win_unlock / MPI_Win_unlock_all
- * - MPI_Win_free
  */
+
+/**
+ * Allocate a shared-memory MPI window (MPI_Win_allocate_shared).
+ *
+ * All processes in the communicator collectively allocate shared memory.
+ * The communicator must be created via MPI_Comm_split_type with
+ * MPI_COMM_TYPE_SHARED so all ranks share a physical memory region.
+ *
+ * @param size Number of bytes to allocate on this rank
+ * @param disp_unit Displacement unit in bytes (e.g., sizeof(double))
+ * @param info Info handle (negative for MPI_INFO_NULL)
+ * @param comm Communicator handle (must be shared-memory communicator)
+ * @param baseptr Output: pointer to allocated memory
+ * @param win Output: window handle
+ * @return MPI error code
+ */
+int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info,
+                                  int32_t comm, void** baseptr, int32_t* win);
+
+/**
+ * Query the shared-memory region of another rank (MPI_Win_shared_query).
+ *
+ * Returns the base pointer, size, and displacement unit of the shared
+ * memory segment belonging to the specified rank in the window.
+ *
+ * @param win Window handle
+ * @param rank Rank to query
+ * @param size Output: size in bytes of the segment at the queried rank
+ * @param disp_unit Output: displacement unit at the queried rank
+ * @param baseptr Output: pointer to the queried rank's shared memory
+ * @return MPI error code
+ */
+int ferrompi_win_shared_query(int32_t win, int32_t rank,
+                               int64_t* size, int32_t* disp_unit, void** baseptr);
+
+/**
+ * Free an MPI window (MPI_Win_free).
+ *
+ * Releases the window and its associated resources. The window handle
+ * slot is freed for reuse. No-op if the handle is invalid.
+ *
+ * @param win Window handle to free
+ * @return MPI error code
+ */
+int ferrompi_win_free(int32_t win);
 
 /* ============================================================
  * Utility Functions

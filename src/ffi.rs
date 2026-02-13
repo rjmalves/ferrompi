@@ -411,6 +411,29 @@ extern "C" {
     pub fn ferrompi_startall(count: int64_t, requests: *mut int64_t) -> c_int;
 
     // ============================================================
+    // RMA / Window
+    // ============================================================
+
+    pub fn ferrompi_win_allocate_shared(
+        size: int64_t,
+        disp_unit: int32_t,
+        info: int32_t,
+        comm: int32_t,
+        baseptr: *mut *mut c_void,
+        win: *mut int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_win_shared_query(
+        win: int32_t,
+        rank: int32_t,
+        size: *mut int64_t,
+        disp_unit: *mut int32_t,
+        baseptr: *mut *mut c_void,
+    ) -> c_int;
+
+    pub fn ferrompi_win_free(win: int32_t) -> c_int;
+
+    // ============================================================
     // Utility Functions
     // ============================================================
 
