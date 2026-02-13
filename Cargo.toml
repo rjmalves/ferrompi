@@ -38,6 +38,11 @@ path = "examples/nonblocking.rs"
 name = "pi_monte_carlo"
 path = "examples/pi_monte_carlo.rs"
 
+[[example]]
+name = "shared_memory"
+path = "examples/shared_memory.rs"
+required-features = ["rma"]
+
 [dependencies]
 thiserror = "2.0"
 
