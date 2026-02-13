@@ -1,7 +1,7 @@
 {
   "plan": "code-coverage-improvement",
   "created": "2026-02-13",
-  "last_updated": "2026-02-13T18:35:00Z",
+  "last_updated": "2026-02-13T18:50:00Z",
   "tickets": {
     "ticket-001": {
       "title": "Coverage runner script",
@@ -20,9 +20,9 @@
     "ticket-003": {
       "title": "MPI lifecycle test example",
       "epic": "epic-02-lib-lifecycle",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T18:50:00Z"
     },
     "ticket-004": {
       "title": "Blocking collective extras",

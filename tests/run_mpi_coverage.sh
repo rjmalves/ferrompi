@@ -196,6 +196,7 @@ echo -e "${BOLD}Running MPI integration tests (instrumented)${RESET}"
 echo -e "${BOLD}════════════════════════════════════════${RESET}"
 
 # Core test examples
+run_test test_lifecycle 2
 run_test test_collectives
 run_test test_nonblocking
 run_test test_comm_split 4

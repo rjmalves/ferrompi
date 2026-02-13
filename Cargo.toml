@@ -71,6 +71,10 @@ path = "examples/test_nonblocking.rs"
 name = "test_comm_split"
 path = "examples/test_comm_split.rs"
 
+[[example]]
+name = "test_lifecycle"
+path = "examples/test_lifecycle.rs"
+
 [dependencies]
 thiserror = "2.0"
 
