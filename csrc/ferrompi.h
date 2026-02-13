@@ -673,6 +673,10 @@ int ferrompi_startall(int64_t count, int64_t* requests);
  * Window handle table supports up to 256 concurrent MPI_Win objects.
  */
 
+/* Lock type constants for MPI_Win_lock / MPI_Win_lock_all */
+#define FERROMPI_LOCK_EXCLUSIVE 0
+#define FERROMPI_LOCK_SHARED    1
+
 /**
  * Allocate a shared-memory MPI window (MPI_Win_allocate_shared).
  *
@@ -717,6 +721,89 @@ int ferrompi_win_shared_query(int32_t win, int32_t rank,
  * @return MPI error code
  */
 int ferrompi_win_free(int32_t win);
+
+/**
+ * Perform a fence synchronization on a window (MPI_Win_fence).
+ *
+ * Synchronizes RMA calls on the window. Used for active target
+ * (fence-based) synchronization epochs.
+ *
+ * @param assert_val Assertion hint (0 for no assertion)
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_fence(int32_t assert_val, int32_t win);
+
+/**
+ * Lock a window at a target rank (MPI_Win_lock).
+ *
+ * Starts a passive target access epoch for RMA operations on the
+ * specified target rank. Must be paired with ferrompi_win_unlock.
+ *
+ * @param lock_type Lock type (FERROMPI_LOCK_EXCLUSIVE or FERROMPI_LOCK_SHARED)
+ * @param rank Target rank
+ * @param assert_val Assertion hint (0 for no assertion)
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_lock(int32_t lock_type, int32_t rank, int32_t assert_val, int32_t win);
+
+/**
+ * Unlock a window at a target rank (MPI_Win_unlock).
+ *
+ * Completes the passive target access epoch started by ferrompi_win_lock.
+ *
+ * @param rank Target rank
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_unlock(int32_t rank, int32_t win);
+
+/**
+ * Lock a window at all ranks (MPI_Win_lock_all).
+ *
+ * Starts a shared passive target access epoch for all ranks.
+ * Must be paired with ferrompi_win_unlock_all.
+ *
+ * @param assert_val Assertion hint (0 for no assertion)
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_lock_all(int32_t assert_val, int32_t win);
+
+/**
+ * Unlock a window at all ranks (MPI_Win_unlock_all).
+ *
+ * Completes the shared passive target access epoch started by
+ * ferrompi_win_lock_all.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_unlock_all(int32_t win);
+
+/**
+ * Flush pending RMA operations to a target rank (MPI_Win_flush).
+ *
+ * Ensures that all RMA operations issued to the target rank have
+ * completed at both origin and target. The access epoch is not closed.
+ *
+ * @param rank Target rank
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_flush(int32_t rank, int32_t win);
+
+/**
+ * Flush pending RMA operations to all ranks (MPI_Win_flush_all).
+ *
+ * Ensures that all RMA operations issued to any target have completed
+ * at both origin and target. The access epoch is not closed.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_flush_all(int32_t win);
 
 /* ============================================================
  * Utility Functions

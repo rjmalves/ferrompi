@@ -1404,6 +1404,49 @@ int ferrompi_win_free(int32_t win_handle) {
     return ret;
 }
 
+int ferrompi_win_fence(int32_t assert_val, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_fence(assert_val, win);
+}
+
+int ferrompi_win_lock(int32_t lock_type, int32_t rank, int32_t assert_val, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    int mpi_lock = (lock_type == FERROMPI_LOCK_SHARED) ? MPI_LOCK_SHARED : MPI_LOCK_EXCLUSIVE;
+    return MPI_Win_lock(mpi_lock, rank, assert_val, win);
+}
+
+int ferrompi_win_unlock(int32_t rank, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_unlock(rank, win);
+}
+
+int ferrompi_win_lock_all(int32_t assert_val, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_lock_all(assert_val, win);
+}
+
+int ferrompi_win_unlock_all(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_unlock_all(win);
+}
+
+int ferrompi_win_flush(int32_t rank, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_flush(rank, win);
+}
+
+int ferrompi_win_flush_all(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_flush_all(win);
+}
+
 #else /* MPI_VERSION < 3 */
 
 int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_handle,
@@ -1419,6 +1462,41 @@ int ferrompi_win_shared_query(int32_t win_handle, int32_t rank,
 }
 
 int ferrompi_win_free(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_fence(int32_t assert_val, int32_t win_handle) {
+    (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_lock(int32_t lock_type, int32_t rank, int32_t assert_val, int32_t win_handle) {
+    (void)lock_type; (void)rank; (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_unlock(int32_t rank, int32_t win_handle) {
+    (void)rank; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_lock_all(int32_t assert_val, int32_t win_handle) {
+    (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_unlock_all(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_flush(int32_t rank, int32_t win_handle) {
+    (void)rank; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_flush_all(int32_t win_handle) {
     (void)win_handle;
     return MPI_ERR_OTHER;
 }

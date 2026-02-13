@@ -11,6 +11,10 @@ use std::os::raw::{c_char, c_double, c_int, c_void};
 pub type int32_t = i32;
 pub type int64_t = i64;
 
+// Lock type constants matching the C header defines
+pub const FERROMPI_LOCK_EXCLUSIVE: int32_t = 0;
+pub const FERROMPI_LOCK_SHARED: int32_t = 1;
+
 extern "C" {
     // ============================================================
     // Initialization and Finalization
@@ -432,6 +436,29 @@ extern "C" {
     ) -> c_int;
 
     pub fn ferrompi_win_free(win: int32_t) -> c_int;
+
+    // ============================================================
+    // RMA / Window Synchronization
+    // ============================================================
+
+    pub fn ferrompi_win_fence(assert_val: int32_t, win: int32_t) -> c_int;
+
+    pub fn ferrompi_win_lock(
+        lock_type: int32_t,
+        rank: int32_t,
+        assert_val: int32_t,
+        win: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_win_unlock(rank: int32_t, win: int32_t) -> c_int;
+
+    pub fn ferrompi_win_lock_all(assert_val: int32_t, win: int32_t) -> c_int;
+
+    pub fn ferrompi_win_unlock_all(win: int32_t) -> c_int;
+
+    pub fn ferrompi_win_flush(rank: int32_t, win: int32_t) -> c_int;
+
+    pub fn ferrompi_win_flush_all(win: int32_t) -> c_int;
 
     // ============================================================
     // Utility Functions
