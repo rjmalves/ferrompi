@@ -189,6 +189,15 @@ echo ""
 # Smoke tests first (to verify MPI works)
 run_test hello_world
 
+# Minimal test binary (fn main + expect pattern, like test binaries)
+run_test test_minimal
+
+# Minimal test binary with Result return type (like passing examples)
+run_test test_minimal_result
+
+# Minimal test binary WITHOUT test_ prefix (fn main + expect)
+run_test diag_minimal
+
 # Core test examples
 run_test test_collectives
 run_test test_nonblocking

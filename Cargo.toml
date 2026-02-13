@@ -71,6 +71,18 @@ path = "examples/test_nonblocking.rs"
 name = "test_comm_split"
 path = "examples/test_comm_split.rs"
 
+[[example]]
+name = "test_minimal"
+path = "examples/test_minimal.rs"
+
+[[example]]
+name = "test_minimal_result"
+path = "examples/test_minimal_result.rs"
+
+[[example]]
+name = "diag_minimal"
+path = "examples/diag_minimal.rs"
+
 [dependencies]
 thiserror = "2.0"
 
