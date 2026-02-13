@@ -1,0 +1,581 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/window.rs`."><title>window.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="ferrompi" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.1 (01f6ddf75 2026-02-11)" data-channel="1.93.1" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">ferrompi/</div>window.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Shared memory windows for intra-node communication.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! This module provides [`SharedWindow&lt;T&gt;`], a safe Rust wrapper around
+<a href=#4 id=4 data-nosnippet>4</a>//! `MPI_Win_allocate_shared` with RAII lifecycle management. Shared memory
+<a href=#5 id=5 data-nosnippet>5</a>//! windows allow processes on the same node to directly access each other's
+<a href=#6 id=6 data-nosnippet>6</a>//! memory without explicit message passing, enabling high-performance
+<a href=#7 id=7 data-nosnippet>7</a>//! intra-node communication.
+<a href=#8 id=8 data-nosnippet>8</a>//!
+<a href=#9 id=9 data-nosnippet>9</a>//! # Synchronization
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! MPI shared memory windows require explicit synchronization:
+<a href=#12 id=12 data-nosnippet>12</a>//!
+<a href=#13 id=13 data-nosnippet>13</a>//! - **Active target**: Use [`SharedWindow::fence()`] for bulk-synchronous access
+<a href=#14 id=14 data-nosnippet>14</a>//!   patterns where all processes participate in synchronization.
+<a href=#15 id=15 data-nosnippet>15</a>//! - **Passive target**: Use [`SharedWindow::lock()`] or [`SharedWindow::lock_all()`]
+<a href=#16 id=16 data-nosnippet>16</a>//!   for fine-grained, one-sided access patterns. These return RAII guards
+<a href=#17 id=17 data-nosnippet>17</a>//!   ([`LockGuard`] / [`LockAllGuard`]) that automatically unlock on drop.
+<a href=#18 id=18 data-nosnippet>18</a>//!
+<a href=#19 id=19 data-nosnippet>19</a>//! # Feature Gate
+<a href=#20 id=20 data-nosnippet>20</a>//!
+<a href=#21 id=21 data-nosnippet>21</a>//! This module is only available when the `rma` feature is enabled.
+<a href=#22 id=22 data-nosnippet>22</a>//!
+<a href=#23 id=23 data-nosnippet>23</a>//! # Example
+<a href=#24 id=24 data-nosnippet>24</a>//!
+<a href=#25 id=25 data-nosnippet>25</a>//! ```no_run
+<a href=#26 id=26 data-nosnippet>26</a>//! use ferrompi::{Mpi, SharedWindow, LockType};
+<a href=#27 id=27 data-nosnippet>27</a>//!
+<a href=#28 id=28 data-nosnippet>28</a>//! let mpi = Mpi::init().unwrap();
+<a href=#29 id=29 data-nosnippet>29</a>//! let world = mpi.world();
+<a href=#30 id=30 data-nosnippet>30</a>//! let node = world.split_shared().unwrap();
+<a href=#31 id=31 data-nosnippet>31</a>//!
+<a href=#32 id=32 data-nosnippet>32</a>//! // Each process allocates 100 f64s in shared memory
+<a href=#33 id=33 data-nosnippet>33</a>//! let mut win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#34 id=34 data-nosnippet>34</a>//!
+<a href=#35 id=35 data-nosnippet>35</a>//! // Write to local portion
+<a href=#36 id=36 data-nosnippet>36</a>//! {
+<a href=#37 id=37 data-nosnippet>37</a>//!     let local = win.local_slice_mut();
+<a href=#38 id=38 data-nosnippet>38</a>//!     for (i, x) in local.iter_mut().enumerate() {
+<a href=#39 id=39 data-nosnippet>39</a>//!         *x = (node.rank() * 100 + i as i32) as f64;
+<a href=#40 id=40 data-nosnippet>40</a>//!     }
+<a href=#41 id=41 data-nosnippet>41</a>//! }
+<a href=#42 id=42 data-nosnippet>42</a>//!
+<a href=#43 id=43 data-nosnippet>43</a>//! // Fence synchronization
+<a href=#44 id=44 data-nosnippet>44</a>//! win.fence().unwrap();
+<a href=#45 id=45 data-nosnippet>45</a>//!
+<a href=#46 id=46 data-nosnippet>46</a>//! // Read from any rank's memory
+<a href=#47 id=47 data-nosnippet>47</a>//! let remote = win.remote_slice(0).unwrap();
+<a href=#48 id=48 data-nosnippet>48</a>//! println!("Rank 0's first value: {}", remote[0]);
+<a href=#49 id=49 data-nosnippet>49</a>//! ```
+<a href=#50 id=50 data-nosnippet>50</a>
+<a href=#51 id=51 data-nosnippet>51</a></span><span class="kw">use </span>std::ptr::NonNull;
+<a href=#52 id=52 data-nosnippet>52</a>
+<a href=#53 id=53 data-nosnippet>53</a><span class="kw">use </span><span class="kw">crate</span>::error::{Error, <span class="prelude-ty">Result</span>};
+<a href=#54 id=54 data-nosnippet>54</a><span class="kw">use </span><span class="kw">crate</span>::ffi;
+<a href=#55 id=55 data-nosnippet>55</a><span class="kw">use </span><span class="kw">crate</span>::Communicator;
+<a href=#56 id=56 data-nosnippet>56</a><span class="kw">use </span><span class="kw">crate</span>::MpiDatatype;
+<a href=#57 id=57 data-nosnippet>57</a>
+<a href=#58 id=58 data-nosnippet>58</a><span class="doccomment">/// Lock type for window synchronization.
+<a href=#59 id=59 data-nosnippet>59</a>///
+<a href=#60 id=60 data-nosnippet>60</a>/// Controls the level of concurrency allowed when locking an MPI window
+<a href=#61 id=61 data-nosnippet>61</a>/// for passive target access.
+<a href=#62 id=62 data-nosnippet>62</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+<a href=#63 id=63 data-nosnippet>63</a></span><span class="kw">pub enum </span>LockType {
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// Exclusive access (no other locks allowed).
+<a href=#65 id=65 data-nosnippet>65</a>    ///
+<a href=#66 id=66 data-nosnippet>66</a>    /// Only one process may hold an exclusive lock on a given rank's
+<a href=#67 id=67 data-nosnippet>67</a>    /// window at a time. This is suitable for read-write access.
+<a href=#68 id=68 data-nosnippet>68</a>    </span>Exclusive,
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// Shared access (multiple shared locks allowed).
+<a href=#70 id=70 data-nosnippet>70</a>    ///
+<a href=#71 id=71 data-nosnippet>71</a>    /// Multiple processes may hold shared locks on a given rank's window
+<a href=#72 id=72 data-nosnippet>72</a>    /// simultaneously. This is suitable for read-only access patterns.
+<a href=#73 id=73 data-nosnippet>73</a>    </span>Shared,
+<a href=#74 id=74 data-nosnippet>74</a>}
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a><span class="doccomment">/// A shared memory window allocated across processes on the same node.
+<a href=#77 id=77 data-nosnippet>77</a>///
+<a href=#78 id=78 data-nosnippet>78</a>/// Created via [`SharedWindow::allocate()`] on a shared-memory communicator
+<a href=#79 id=79 data-nosnippet>79</a>/// (typically obtained from [`Communicator::split_shared()`]).
+<a href=#80 id=80 data-nosnippet>80</a>///
+<a href=#81 id=81 data-nosnippet>81</a>/// Each process in the communicator contributes a local segment of `local_count`
+<a href=#82 id=82 data-nosnippet>82</a>/// elements of type `T` to the shared memory region. All processes can then
+<a href=#83 id=83 data-nosnippet>83</a>/// access any rank's segment via [`remote_slice()`](Self::remote_slice), provided
+<a href=#84 id=84 data-nosnippet>84</a>/// proper synchronization is used.
+<a href=#85 id=85 data-nosnippet>85</a>///
+<a href=#86 id=86 data-nosnippet>86</a>/// # RAII Lifecycle
+<a href=#87 id=87 data-nosnippet>87</a>///
+<a href=#88 id=88 data-nosnippet>88</a>/// The underlying MPI window is freed automatically when the `SharedWindow`
+<a href=#89 id=89 data-nosnippet>89</a>/// is dropped. The shared memory region becomes invalid after the window is freed.
+<a href=#90 id=90 data-nosnippet>90</a>///
+<a href=#91 id=91 data-nosnippet>91</a>/// # Thread Safety
+<a href=#92 id=92 data-nosnippet>92</a>///
+<a href=#93 id=93 data-nosnippet>93</a>/// `SharedWindow` is intentionally **not** `Send` or `Sync`. MPI windows have
+<a href=#94 id=94 data-nosnippet>94</a>/// specific thread-safety rules that depend on the MPI thread level, and incorrect
+<a href=#95 id=95 data-nosnippet>95</a>/// cross-thread usage can cause data corruption or MPI errors.
+<a href=#96 id=96 data-nosnippet>96</a>///
+<a href=#97 id=97 data-nosnippet>97</a>/// # Example
+<a href=#98 id=98 data-nosnippet>98</a>///
+<a href=#99 id=99 data-nosnippet>99</a>/// ```no_run
+<a href=#100 id=100 data-nosnippet>100</a>/// use ferrompi::{Mpi, SharedWindow, LockType};
+<a href=#101 id=101 data-nosnippet>101</a>///
+<a href=#102 id=102 data-nosnippet>102</a>/// let mpi = Mpi::init().unwrap();
+<a href=#103 id=103 data-nosnippet>103</a>/// let world = mpi.world();
+<a href=#104 id=104 data-nosnippet>104</a>/// let node = world.split_shared().unwrap();
+<a href=#105 id=105 data-nosnippet>105</a>///
+<a href=#106 id=106 data-nosnippet>106</a>/// // Each process allocates 100 f64s in shared memory
+<a href=#107 id=107 data-nosnippet>107</a>/// let mut win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#108 id=108 data-nosnippet>108</a>///
+<a href=#109 id=109 data-nosnippet>109</a>/// // Write to local portion
+<a href=#110 id=110 data-nosnippet>110</a>/// {
+<a href=#111 id=111 data-nosnippet>111</a>///     let local = win.local_slice_mut();
+<a href=#112 id=112 data-nosnippet>112</a>///     for (i, x) in local.iter_mut().enumerate() {
+<a href=#113 id=113 data-nosnippet>113</a>///         *x = (node.rank() * 100 + i as i32) as f64;
+<a href=#114 id=114 data-nosnippet>114</a>///     }
+<a href=#115 id=115 data-nosnippet>115</a>/// }
+<a href=#116 id=116 data-nosnippet>116</a>///
+<a href=#117 id=117 data-nosnippet>117</a>/// // Fence synchronization
+<a href=#118 id=118 data-nosnippet>118</a>/// win.fence().unwrap();
+<a href=#119 id=119 data-nosnippet>119</a>///
+<a href=#120 id=120 data-nosnippet>120</a>/// // Read from any rank's memory
+<a href=#121 id=121 data-nosnippet>121</a>/// let remote = win.remote_slice(0).unwrap();
+<a href=#122 id=122 data-nosnippet>122</a>/// println!("Rank 0's first value: {}", remote[0]);
+<a href=#123 id=123 data-nosnippet>123</a>/// ```
+<a href=#124 id=124 data-nosnippet>124</a></span><span class="kw">pub struct </span>SharedWindow&lt;T: MpiDatatype&gt; {
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// The MPI window handle (index into the C-layer window table).
+<a href=#126 id=126 data-nosnippet>126</a>    </span>win_handle: i32,
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// Non-null pointer to this process's local shared memory segment.
+<a href=#128 id=128 data-nosnippet>128</a>    </span>local_ptr: NonNull&lt;T&gt;,
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// Number of `T` elements in the local segment.
+<a href=#130 id=130 data-nosnippet>130</a>    </span>local_len: usize,
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// Number of processes in the communicator that created this window.
+<a href=#132 id=132 data-nosnippet>132</a>    </span>comm_size: i32,
+<a href=#133 id=133 data-nosnippet>133</a>}
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; SharedWindow&lt;T&gt; {
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="doccomment">/// Allocate a shared memory window.
+<a href=#137 id=137 data-nosnippet>137</a>    ///
+<a href=#138 id=138 data-nosnippet>138</a>    /// Each process in `comm` allocates `local_count` elements of type `T`
+<a href=#139 id=139 data-nosnippet>139</a>    /// in a shared memory segment accessible by all processes in the communicator.
+<a href=#140 id=140 data-nosnippet>140</a>    /// The communicator should be a shared-memory communicator (e.g., from
+<a href=#141 id=141 data-nosnippet>141</a>    /// [`Communicator::split_shared()`]).
+<a href=#142 id=142 data-nosnippet>142</a>    ///
+<a href=#143 id=143 data-nosnippet>143</a>    /// # Arguments
+<a href=#144 id=144 data-nosnippet>144</a>    ///
+<a href=#145 id=145 data-nosnippet>145</a>    /// * `comm` - A shared-memory communicator (all processes must be on the same node)
+<a href=#146 id=146 data-nosnippet>146</a>    /// * `local_count` - Number of elements of type `T` to allocate locally
+<a href=#147 id=147 data-nosnippet>147</a>    ///
+<a href=#148 id=148 data-nosnippet>148</a>    /// # Errors
+<a href=#149 id=149 data-nosnippet>149</a>    ///
+<a href=#150 id=150 data-nosnippet>150</a>    /// Returns an error if:
+<a href=#151 id=151 data-nosnippet>151</a>    /// - The MPI window allocation fails (e.g., insufficient shared memory)
+<a href=#152 id=152 data-nosnippet>152</a>    /// - The MPI implementation returns a null base pointer
+<a href=#153 id=153 data-nosnippet>153</a>    ///
+<a href=#154 id=154 data-nosnippet>154</a>    /// # Example
+<a href=#155 id=155 data-nosnippet>155</a>    ///
+<a href=#156 id=156 data-nosnippet>156</a>    /// ```no_run
+<a href=#157 id=157 data-nosnippet>157</a>    /// use ferrompi::{Mpi, SharedWindow};
+<a href=#158 id=158 data-nosnippet>158</a>    ///
+<a href=#159 id=159 data-nosnippet>159</a>    /// let mpi = Mpi::init().unwrap();
+<a href=#160 id=160 data-nosnippet>160</a>    /// let node = mpi.world().split_shared().unwrap();
+<a href=#161 id=161 data-nosnippet>161</a>    /// let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 1024).unwrap();
+<a href=#162 id=162 data-nosnippet>162</a>    /// ```
+<a href=#163 id=163 data-nosnippet>163</a>    </span><span class="kw">pub fn </span>allocate(comm: <span class="kw-2">&amp;</span>Communicator, local_count: usize) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#164 id=164 data-nosnippet>164</a>        <span class="kw">let </span>size = (local_count * std::mem::size_of::&lt;T&gt;()) <span class="kw">as </span>i64;
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>disp_unit = std::mem::size_of::&lt;T&gt;() <span class="kw">as </span>i32;
+<a href=#166 id=166 data-nosnippet>166</a>        <span class="kw">let </span><span class="kw-2">mut </span>baseptr: <span class="kw-2">*mut </span>std::ffi::c_void = std::ptr::null_mut();
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span><span class="kw-2">mut </span>win_handle: i32 = <span class="number">0</span>;
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="comment">// SAFETY: We pass valid pointers for out-parameters. The C layer
+<a href=#170 id=170 data-nosnippet>170</a>        // allocates shared memory and returns a window handle + base pointer.
+<a href=#171 id=171 data-nosnippet>171</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{
+<a href=#172 id=172 data-nosnippet>172</a>            ffi::ferrompi_win_allocate_shared(
+<a href=#173 id=173 data-nosnippet>173</a>                size,
+<a href=#174 id=174 data-nosnippet>174</a>                disp_unit,
+<a href=#175 id=175 data-nosnippet>175</a>                -<span class="number">1</span>, <span class="comment">// MPI_INFO_NULL
+<a href=#176 id=176 data-nosnippet>176</a>                </span>comm.raw_handle(),
+<a href=#177 id=177 data-nosnippet>177</a>                <span class="kw-2">&amp;mut </span>baseptr,
+<a href=#178 id=178 data-nosnippet>178</a>                <span class="kw-2">&amp;mut </span>win_handle,
+<a href=#179 id=179 data-nosnippet>179</a>            )
+<a href=#180 id=180 data-nosnippet>180</a>        };
+<a href=#181 id=181 data-nosnippet>181</a>        Error::check(ret)<span class="question-mark">?</span>;
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">let </span>local_ptr = NonNull::new(baseptr.cast::&lt;T&gt;())
+<a href=#184 id=184 data-nosnippet>184</a>            .ok_or_else(|| Error::Internal(<span class="string">"Win_allocate_shared returned null"</span>.into()))<span class="question-mark">?</span>;
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="prelude-val">Ok</span>(SharedWindow {
+<a href=#187 id=187 data-nosnippet>187</a>            win_handle,
+<a href=#188 id=188 data-nosnippet>188</a>            local_ptr,
+<a href=#189 id=189 data-nosnippet>189</a>            local_len: local_count,
+<a href=#190 id=190 data-nosnippet>190</a>            comm_size: comm.size(),
+<a href=#191 id=191 data-nosnippet>191</a>        })
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="doccomment">/// Get a slice of this process's local shared memory segment.
+<a href=#195 id=195 data-nosnippet>195</a>    ///
+<a href=#196 id=196 data-nosnippet>196</a>    /// The returned slice provides read access to the `local_count` elements
+<a href=#197 id=197 data-nosnippet>197</a>    /// that were allocated by this process in [`allocate()`](Self::allocate).
+<a href=#198 id=198 data-nosnippet>198</a>    ///
+<a href=#199 id=199 data-nosnippet>199</a>    /// # Safety Contract
+<a href=#200 id=200 data-nosnippet>200</a>    ///
+<a href=#201 id=201 data-nosnippet>201</a>    /// The caller must ensure proper MPI synchronization (fence or lock)
+<a href=#202 id=202 data-nosnippet>202</a>    /// before reading data that may have been written by other processes.
+<a href=#203 id=203 data-nosnippet>203</a>    </span><span class="kw">pub fn </span>local_slice(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[T] {
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="comment">// SAFETY: `local_ptr` was returned by MPI_Win_allocate_shared and is
+<a href=#205 id=205 data-nosnippet>205</a>        // guaranteed valid for `local_len` elements of type T for the lifetime
+<a href=#206 id=206 data-nosnippet>206</a>        // of the window. The pointer is non-null (checked in allocate()).
+<a href=#207 id=207 data-nosnippet>207</a>        </span><span class="kw">unsafe </span>{ std::slice::from_raw_parts(<span class="self">self</span>.local_ptr.as_ptr(), <span class="self">self</span>.local_len) }
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="doccomment">/// Get a mutable slice of this process's local shared memory segment.
+<a href=#211 id=211 data-nosnippet>211</a>    ///
+<a href=#212 id=212 data-nosnippet>212</a>    /// The returned slice provides read-write access to the `local_count` elements
+<a href=#213 id=213 data-nosnippet>213</a>    /// that were allocated by this process in [`allocate()`](Self::allocate).
+<a href=#214 id=214 data-nosnippet>214</a>    ///
+<a href=#215 id=215 data-nosnippet>215</a>    /// # Safety Contract
+<a href=#216 id=216 data-nosnippet>216</a>    ///
+<a href=#217 id=217 data-nosnippet>217</a>    /// The caller must ensure proper MPI synchronization (fence or lock)
+<a href=#218 id=218 data-nosnippet>218</a>    /// before writing data that other processes may read.
+<a href=#219 id=219 data-nosnippet>219</a>    </span><span class="kw">pub fn </span>local_slice_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>[T] {
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="comment">// SAFETY: `local_ptr` was returned by MPI_Win_allocate_shared and is
+<a href=#221 id=221 data-nosnippet>221</a>        // guaranteed valid for `local_len` elements of type T for the lifetime
+<a href=#222 id=222 data-nosnippet>222</a>        // of the window. We have `&amp;mut self` ensuring exclusive access.
+<a href=#223 id=223 data-nosnippet>223</a>        </span><span class="kw">unsafe </span>{ std::slice::from_raw_parts_mut(<span class="self">self</span>.local_ptr.as_ptr(), <span class="self">self</span>.local_len) }
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>
+<a href=#226 id=226 data-nosnippet>226</a>    <span class="doccomment">/// Query another rank's shared memory region.
+<a href=#227 id=227 data-nosnippet>227</a>    ///
+<a href=#228 id=228 data-nosnippet>228</a>    /// Returns a slice of the shared memory segment allocated by the specified
+<a href=#229 id=229 data-nosnippet>229</a>    /// rank. This allows direct read access to remote memory without any
+<a href=#230 id=230 data-nosnippet>230</a>    /// message passing overhead.
+<a href=#231 id=231 data-nosnippet>231</a>    ///
+<a href=#232 id=232 data-nosnippet>232</a>    /// # Arguments
+<a href=#233 id=233 data-nosnippet>233</a>    ///
+<a href=#234 id=234 data-nosnippet>234</a>    /// * `rank` - The rank whose shared memory to query (0-based)
+<a href=#235 id=235 data-nosnippet>235</a>    ///
+<a href=#236 id=236 data-nosnippet>236</a>    /// # Errors
+<a href=#237 id=237 data-nosnippet>237</a>    ///
+<a href=#238 id=238 data-nosnippet>238</a>    /// Returns an error if:
+<a href=#239 id=239 data-nosnippet>239</a>    /// - The rank is out of range
+<a href=#240 id=240 data-nosnippet>240</a>    /// - The MPI shared query call fails
+<a href=#241 id=241 data-nosnippet>241</a>    ///
+<a href=#242 id=242 data-nosnippet>242</a>    /// # Safety Contract
+<a href=#243 id=243 data-nosnippet>243</a>    ///
+<a href=#244 id=244 data-nosnippet>244</a>    /// The caller must ensure proper MPI synchronization (fence or lock)
+<a href=#245 id=245 data-nosnippet>245</a>    /// before reading data that was written by the remote process.
+<a href=#246 id=246 data-nosnippet>246</a>    ///
+<a href=#247 id=247 data-nosnippet>247</a>    /// # Example
+<a href=#248 id=248 data-nosnippet>248</a>    ///
+<a href=#249 id=249 data-nosnippet>249</a>    /// ```no_run
+<a href=#250 id=250 data-nosnippet>250</a>    /// # use ferrompi::{Mpi, SharedWindow};
+<a href=#251 id=251 data-nosnippet>251</a>    /// # let mpi = Mpi::init().unwrap();
+<a href=#252 id=252 data-nosnippet>252</a>    /// # let node = mpi.world().split_shared().unwrap();
+<a href=#253 id=253 data-nosnippet>253</a>    /// # let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#254 id=254 data-nosnippet>254</a>    /// // Read rank 0's shared memory
+<a href=#255 id=255 data-nosnippet>255</a>    /// let remote = win.remote_slice(0).unwrap();
+<a href=#256 id=256 data-nosnippet>256</a>    /// println!("Rank 0 has {} elements, first = {}", remote.len(), remote[0]);
+<a href=#257 id=257 data-nosnippet>257</a>    /// ```
+<a href=#258 id=258 data-nosnippet>258</a>    </span><span class="kw">pub fn </span>remote_slice(<span class="kw-2">&amp;</span><span class="self">self</span>, rank: i32) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>[T]&gt; {
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span><span class="kw-2">mut </span>size: i64 = <span class="number">0</span>;
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">let </span><span class="kw-2">mut </span>disp_unit: i32 = <span class="number">0</span>;
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">let </span><span class="kw-2">mut </span>baseptr: <span class="kw-2">*mut </span>std::ffi::c_void = std::ptr::null_mut();
+<a href=#262 id=262 data-nosnippet>262</a>
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="comment">// SAFETY: We pass valid pointers for out-parameters. The C layer queries
+<a href=#264 id=264 data-nosnippet>264</a>        // the MPI window for the base pointer and size of the specified rank's
+<a href=#265 id=265 data-nosnippet>265</a>        // shared memory segment.
+<a href=#266 id=266 data-nosnippet>266</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{
+<a href=#267 id=267 data-nosnippet>267</a>            ffi::ferrompi_win_shared_query(
+<a href=#268 id=268 data-nosnippet>268</a>                <span class="self">self</span>.win_handle,
+<a href=#269 id=269 data-nosnippet>269</a>                rank,
+<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw-2">&amp;mut </span>size,
+<a href=#271 id=271 data-nosnippet>271</a>                <span class="kw-2">&amp;mut </span>disp_unit,
+<a href=#272 id=272 data-nosnippet>272</a>                <span class="kw-2">&amp;mut </span>baseptr,
+<a href=#273 id=273 data-nosnippet>273</a>            )
+<a href=#274 id=274 data-nosnippet>274</a>        };
+<a href=#275 id=275 data-nosnippet>275</a>        Error::check(ret)<span class="question-mark">?</span>;
+<a href=#276 id=276 data-nosnippet>276</a>
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>count = size <span class="kw">as </span>usize / std::mem::size_of::&lt;T&gt;();
+<a href=#278 id=278 data-nosnippet>278</a>        <span class="comment">// SAFETY: MPI_Win_shared_query returns a valid pointer to the shared
+<a href=#279 id=279 data-nosnippet>279</a>        // memory segment of the specified rank. The pointer is valid for `count`
+<a href=#280 id=280 data-nosnippet>280</a>        // elements of type T for the lifetime of the window.
+<a href=#281 id=281 data-nosnippet>281</a>        </span><span class="prelude-val">Ok</span>(<span class="kw">unsafe </span>{ std::slice::from_raw_parts(baseptr.cast::&lt;T&gt;(), count) })
+<a href=#282 id=282 data-nosnippet>282</a>    }
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="doccomment">/// Fence synchronization (active target).
+<a href=#285 id=285 data-nosnippet>285</a>    ///
+<a href=#286 id=286 data-nosnippet>286</a>    /// A collective operation that synchronizes all accesses to the window.
+<a href=#287 id=287 data-nosnippet>287</a>    /// All processes in the window's communicator must call this function.
+<a href=#288 id=288 data-nosnippet>288</a>    /// After `fence()` returns, all preceding local stores are visible to
+<a href=#289 id=289 data-nosnippet>289</a>    /// remote processes, and all remote stores are visible locally.
+<a href=#290 id=290 data-nosnippet>290</a>    ///
+<a href=#291 id=291 data-nosnippet>291</a>    /// This is the simplest synchronization mode, suitable for bulk-synchronous
+<a href=#292 id=292 data-nosnippet>292</a>    /// access patterns (e.g., write phase → fence → read phase → fence).
+<a href=#293 id=293 data-nosnippet>293</a>    ///
+<a href=#294 id=294 data-nosnippet>294</a>    /// # Errors
+<a href=#295 id=295 data-nosnippet>295</a>    ///
+<a href=#296 id=296 data-nosnippet>296</a>    /// Returns an error if the MPI fence operation fails.
+<a href=#297 id=297 data-nosnippet>297</a>    ///
+<a href=#298 id=298 data-nosnippet>298</a>    /// # Example
+<a href=#299 id=299 data-nosnippet>299</a>    ///
+<a href=#300 id=300 data-nosnippet>300</a>    /// ```no_run
+<a href=#301 id=301 data-nosnippet>301</a>    /// # use ferrompi::{Mpi, SharedWindow};
+<a href=#302 id=302 data-nosnippet>302</a>    /// # let mpi = Mpi::init().unwrap();
+<a href=#303 id=303 data-nosnippet>303</a>    /// # let node = mpi.world().split_shared().unwrap();
+<a href=#304 id=304 data-nosnippet>304</a>    /// # let mut win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#305 id=305 data-nosnippet>305</a>    /// // Write phase
+<a href=#306 id=306 data-nosnippet>306</a>    /// win.local_slice_mut()[0] = 42.0;
+<a href=#307 id=307 data-nosnippet>307</a>    ///
+<a href=#308 id=308 data-nosnippet>308</a>    /// // Synchronize
+<a href=#309 id=309 data-nosnippet>309</a>    /// win.fence().unwrap();
+<a href=#310 id=310 data-nosnippet>310</a>    ///
+<a href=#311 id=311 data-nosnippet>311</a>    /// // Read phase — all writes from all ranks are now visible
+<a href=#312 id=312 data-nosnippet>312</a>    /// let remote = win.remote_slice(0).unwrap();
+<a href=#313 id=313 data-nosnippet>313</a>    /// ```
+<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">pub fn </span>fence(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+<a href=#315 id=315 data-nosnippet>315</a>        <span class="comment">// SAFETY: win_handle is a valid MPI window handle.
+<a href=#316 id=316 data-nosnippet>316</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_fence(<span class="number">0</span>, <span class="self">self</span>.win_handle) };
+<a href=#317 id=317 data-nosnippet>317</a>        Error::check(ret)
+<a href=#318 id=318 data-nosnippet>318</a>    }
+<a href=#319 id=319 data-nosnippet>319</a>
+<a href=#320 id=320 data-nosnippet>320</a>    <span class="doccomment">/// Lock a specific rank's window (passive target synchronization).
+<a href=#321 id=321 data-nosnippet>321</a>    ///
+<a href=#322 id=322 data-nosnippet>322</a>    /// Acquires a lock on the specified rank's window, allowing one-sided
+<a href=#323 id=323 data-nosnippet>323</a>    /// access to that rank's shared memory. Returns a [`LockGuard`] that
+<a href=#324 id=324 data-nosnippet>324</a>    /// automatically unlocks the window when dropped.
+<a href=#325 id=325 data-nosnippet>325</a>    ///
+<a href=#326 id=326 data-nosnippet>326</a>    /// # Arguments
+<a href=#327 id=327 data-nosnippet>327</a>    ///
+<a href=#328 id=328 data-nosnippet>328</a>    /// * `lock_type` - [`LockType::Exclusive`] for read-write access, or
+<a href=#329 id=329 data-nosnippet>329</a>    ///   [`LockType::Shared`] for read-only access
+<a href=#330 id=330 data-nosnippet>330</a>    /// * `rank` - The rank to lock (0-based)
+<a href=#331 id=331 data-nosnippet>331</a>    ///
+<a href=#332 id=332 data-nosnippet>332</a>    /// # Errors
+<a href=#333 id=333 data-nosnippet>333</a>    ///
+<a href=#334 id=334 data-nosnippet>334</a>    /// Returns an error if the MPI lock operation fails.
+<a href=#335 id=335 data-nosnippet>335</a>    ///
+<a href=#336 id=336 data-nosnippet>336</a>    /// # Example
+<a href=#337 id=337 data-nosnippet>337</a>    ///
+<a href=#338 id=338 data-nosnippet>338</a>    /// ```no_run
+<a href=#339 id=339 data-nosnippet>339</a>    /// # use ferrompi::{Mpi, SharedWindow, LockType};
+<a href=#340 id=340 data-nosnippet>340</a>    /// # let mpi = Mpi::init().unwrap();
+<a href=#341 id=341 data-nosnippet>341</a>    /// # let node = mpi.world().split_shared().unwrap();
+<a href=#342 id=342 data-nosnippet>342</a>    /// # let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#343 id=343 data-nosnippet>343</a>    /// {
+<a href=#344 id=344 data-nosnippet>344</a>    ///     let guard = win.lock(LockType::Shared, 0).unwrap();
+<a href=#345 id=345 data-nosnippet>345</a>    ///     let remote = win.remote_slice(0).unwrap();
+<a href=#346 id=346 data-nosnippet>346</a>    ///     println!("Value: {}", remote[0]);
+<a href=#347 id=347 data-nosnippet>347</a>    ///     guard.flush().unwrap();
+<a href=#348 id=348 data-nosnippet>348</a>    ///     // Lock is released when `guard` is dropped
+<a href=#349 id=349 data-nosnippet>349</a>    /// }
+<a href=#350 id=350 data-nosnippet>350</a>    /// ```
+<a href=#351 id=351 data-nosnippet>351</a>    </span><span class="kw">pub fn </span>lock(<span class="kw-2">&amp;</span><span class="self">self</span>, lock_type: LockType, rank: i32) -&gt; <span class="prelude-ty">Result</span>&lt;LockGuard&lt;<span class="lifetime">'_</span>, T&gt;&gt; {
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">let </span>lt = <span class="kw">match </span>lock_type {
+<a href=#353 id=353 data-nosnippet>353</a>            LockType::Exclusive =&gt; ffi::FERROMPI_LOCK_EXCLUSIVE,
+<a href=#354 id=354 data-nosnippet>354</a>            LockType::Shared =&gt; ffi::FERROMPI_LOCK_SHARED,
+<a href=#355 id=355 data-nosnippet>355</a>        };
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="comment">// SAFETY: win_handle is a valid MPI window handle.
+<a href=#357 id=357 data-nosnippet>357</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_lock(lt, rank, <span class="number">0</span>, <span class="self">self</span>.win_handle) };
+<a href=#358 id=358 data-nosnippet>358</a>        Error::check(ret)<span class="question-mark">?</span>;
+<a href=#359 id=359 data-nosnippet>359</a>        <span class="prelude-val">Ok</span>(LockGuard { window: <span class="self">self</span>, rank })
+<a href=#360 id=360 data-nosnippet>360</a>    }
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// Lock all ranks' windows (passive target synchronization).
+<a href=#363 id=363 data-nosnippet>363</a>    ///
+<a href=#364 id=364 data-nosnippet>364</a>    /// Acquires shared locks on all ranks in the window's communicator.
+<a href=#365 id=365 data-nosnippet>365</a>    /// Returns a [`LockAllGuard`] that automatically unlocks all windows
+<a href=#366 id=366 data-nosnippet>366</a>    /// when dropped.
+<a href=#367 id=367 data-nosnippet>367</a>    ///
+<a href=#368 id=368 data-nosnippet>368</a>    /// This is useful for algorithms that need to access multiple ranks'
+<a href=#369 id=369 data-nosnippet>369</a>    /// memory in a single epoch without individual lock/unlock overhead.
+<a href=#370 id=370 data-nosnippet>370</a>    ///
+<a href=#371 id=371 data-nosnippet>371</a>    /// # Errors
+<a href=#372 id=372 data-nosnippet>372</a>    ///
+<a href=#373 id=373 data-nosnippet>373</a>    /// Returns an error if the MPI lock_all operation fails.
+<a href=#374 id=374 data-nosnippet>374</a>    ///
+<a href=#375 id=375 data-nosnippet>375</a>    /// # Example
+<a href=#376 id=376 data-nosnippet>376</a>    ///
+<a href=#377 id=377 data-nosnippet>377</a>    /// ```no_run
+<a href=#378 id=378 data-nosnippet>378</a>    /// # use ferrompi::{Mpi, SharedWindow};
+<a href=#379 id=379 data-nosnippet>379</a>    /// # let mpi = Mpi::init().unwrap();
+<a href=#380 id=380 data-nosnippet>380</a>    /// # let node = mpi.world().split_shared().unwrap();
+<a href=#381 id=381 data-nosnippet>381</a>    /// # let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#382 id=382 data-nosnippet>382</a>    /// {
+<a href=#383 id=383 data-nosnippet>383</a>    ///     let guard = win.lock_all().unwrap();
+<a href=#384 id=384 data-nosnippet>384</a>    ///     // Access any rank's memory
+<a href=#385 id=385 data-nosnippet>385</a>    ///     for rank in 0..node.size() {
+<a href=#386 id=386 data-nosnippet>386</a>    ///         let remote = win.remote_slice(rank).unwrap();
+<a href=#387 id=387 data-nosnippet>387</a>    ///         println!("Rank {rank} first value: {}", remote[0]);
+<a href=#388 id=388 data-nosnippet>388</a>    ///     }
+<a href=#389 id=389 data-nosnippet>389</a>    ///     guard.flush_all().unwrap();
+<a href=#390 id=390 data-nosnippet>390</a>    ///     // All locks released when `guard` is dropped
+<a href=#391 id=391 data-nosnippet>391</a>    /// }
+<a href=#392 id=392 data-nosnippet>392</a>    /// ```
+<a href=#393 id=393 data-nosnippet>393</a>    </span><span class="kw">pub fn </span>lock_all(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;LockAllGuard&lt;<span class="lifetime">'_</span>, T&gt;&gt; {
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="comment">// SAFETY: win_handle is a valid MPI window handle.
+<a href=#395 id=395 data-nosnippet>395</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_lock_all(<span class="number">0</span>, <span class="self">self</span>.win_handle) };
+<a href=#396 id=396 data-nosnippet>396</a>        Error::check(ret)<span class="question-mark">?</span>;
+<a href=#397 id=397 data-nosnippet>397</a>        <span class="prelude-val">Ok</span>(LockAllGuard { window: <span class="self">self </span>})
+<a href=#398 id=398 data-nosnippet>398</a>    }
+<a href=#399 id=399 data-nosnippet>399</a>
+<a href=#400 id=400 data-nosnippet>400</a>    <span class="doccomment">/// Get the raw MPI window handle.
+<a href=#401 id=401 data-nosnippet>401</a>    ///
+<a href=#402 id=402 data-nosnippet>402</a>    /// This is provided for advanced use cases where direct access to the
+<a href=#403 id=403 data-nosnippet>403</a>    /// underlying MPI window handle is needed (e.g., custom FFI calls).
+<a href=#404 id=404 data-nosnippet>404</a>    </span><span class="kw">pub fn </span>raw_handle(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i32 {
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="self">self</span>.win_handle
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="doccomment">/// Get the number of processes in the window's communicator.
+<a href=#409 id=409 data-nosnippet>409</a>    ///
+<a href=#410 id=410 data-nosnippet>410</a>    /// This equals the size of the communicator that was used to create
+<a href=#411 id=411 data-nosnippet>411</a>    /// the window, and determines the valid range of ranks for
+<a href=#412 id=412 data-nosnippet>412</a>    /// [`remote_slice()`](Self::remote_slice) and [`lock()`](Self::lock).
+<a href=#413 id=413 data-nosnippet>413</a>    </span><span class="kw">pub fn </span>comm_size(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i32 {
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="self">self</span>.comm_size
+<a href=#415 id=415 data-nosnippet>415</a>    }
+<a href=#416 id=416 data-nosnippet>416</a>}
+<a href=#417 id=417 data-nosnippet>417</a>
+<a href=#418 id=418 data-nosnippet>418</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; Drop <span class="kw">for </span>SharedWindow&lt;T&gt; {
+<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="comment">// SAFETY: win_handle is a valid MPI window handle that was allocated
+<a href=#421 id=421 data-nosnippet>421</a>        // by ferrompi_win_allocate_shared. It has not been freed yet because
+<a href=#422 id=422 data-nosnippet>422</a>        // Drop is only called once, and we don't expose a manual free method.
+<a href=#423 id=423 data-nosnippet>423</a>        </span><span class="kw">unsafe </span>{ ffi::ferrompi_win_free(<span class="self">self</span>.win_handle) };
+<a href=#424 id=424 data-nosnippet>424</a>    }
+<a href=#425 id=425 data-nosnippet>425</a>}
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a><span class="comment">// SharedWindow is not Send/Sync by default due to NonNull&lt;T&gt;.
+<a href=#428 id=428 data-nosnippet>428</a>// This is the correct behavior — MPI windows have specific thread-safety
+<a href=#429 id=429 data-nosnippet>429</a>// rules and should not be shared across threads without careful coordination.
+<a href=#430 id=430 data-nosnippet>430</a>
+<a href=#431 id=431 data-nosnippet>431</a></span><span class="doccomment">/// RAII guard for a single-rank window lock.
+<a href=#432 id=432 data-nosnippet>432</a>///
+<a href=#433 id=433 data-nosnippet>433</a>/// Created by [`SharedWindow::lock()`]. When dropped, the lock on the
+<a href=#434 id=434 data-nosnippet>434</a>/// specified rank is automatically released via `MPI_Win_unlock`.
+<a href=#435 id=435 data-nosnippet>435</a>///
+<a href=#436 id=436 data-nosnippet>436</a>/// # Example
+<a href=#437 id=437 data-nosnippet>437</a>///
+<a href=#438 id=438 data-nosnippet>438</a>/// ```no_run
+<a href=#439 id=439 data-nosnippet>439</a>/// # use ferrompi::{Mpi, SharedWindow, LockType};
+<a href=#440 id=440 data-nosnippet>440</a>/// # let mpi = Mpi::init().unwrap();
+<a href=#441 id=441 data-nosnippet>441</a>/// # let node = mpi.world().split_shared().unwrap();
+<a href=#442 id=442 data-nosnippet>442</a>/// # let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#443 id=443 data-nosnippet>443</a>/// {
+<a href=#444 id=444 data-nosnippet>444</a>///     let guard = win.lock(LockType::Shared, 0).unwrap();
+<a href=#445 id=445 data-nosnippet>445</a>///     let remote = win.remote_slice(0).unwrap();
+<a href=#446 id=446 data-nosnippet>446</a>///     // Ensure all operations are completed
+<a href=#447 id=447 data-nosnippet>447</a>///     guard.flush().unwrap();
+<a href=#448 id=448 data-nosnippet>448</a>/// } // Lock released here
+<a href=#449 id=449 data-nosnippet>449</a>/// ```
+<a href=#450 id=450 data-nosnippet>450</a></span><span class="kw">pub struct </span>LockGuard&lt;<span class="lifetime">'a</span>, T: MpiDatatype&gt; {
+<a href=#451 id=451 data-nosnippet>451</a>    window: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>SharedWindow&lt;T&gt;,
+<a href=#452 id=452 data-nosnippet>452</a>    rank: i32,
+<a href=#453 id=453 data-nosnippet>453</a>}
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; LockGuard&lt;<span class="lifetime">'_</span>, T&gt; {
+<a href=#456 id=456 data-nosnippet>456</a>    <span class="doccomment">/// Flush pending RMA operations to the locked rank.
+<a href=#457 id=457 data-nosnippet>457</a>    ///
+<a href=#458 id=458 data-nosnippet>458</a>    /// Ensures that all preceding RMA operations (put, get, accumulate)
+<a href=#459 id=459 data-nosnippet>459</a>    /// issued to the locked rank are completed at the target.
+<a href=#460 id=460 data-nosnippet>460</a>    ///
+<a href=#461 id=461 data-nosnippet>461</a>    /// # Errors
+<a href=#462 id=462 data-nosnippet>462</a>    ///
+<a href=#463 id=463 data-nosnippet>463</a>    /// Returns an error if the MPI flush operation fails.
+<a href=#464 id=464 data-nosnippet>464</a>    </span><span class="kw">pub fn </span>flush(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+<a href=#465 id=465 data-nosnippet>465</a>        <span class="comment">// SAFETY: The window handle is valid (borrowed from SharedWindow)
+<a href=#466 id=466 data-nosnippet>466</a>        // and the rank was locked in the constructor.
+<a href=#467 id=467 data-nosnippet>467</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_flush(<span class="self">self</span>.rank, <span class="self">self</span>.window.win_handle) };
+<a href=#468 id=468 data-nosnippet>468</a>        Error::check(ret)
+<a href=#469 id=469 data-nosnippet>469</a>    }
+<a href=#470 id=470 data-nosnippet>470</a>}
+<a href=#471 id=471 data-nosnippet>471</a>
+<a href=#472 id=472 data-nosnippet>472</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; Drop <span class="kw">for </span>LockGuard&lt;<span class="lifetime">'_</span>, T&gt; {
+<a href=#473 id=473 data-nosnippet>473</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#474 id=474 data-nosnippet>474</a>        <span class="comment">// SAFETY: The window handle is valid (borrowed from SharedWindow)
+<a href=#475 id=475 data-nosnippet>475</a>        // and the rank was locked in the constructor. This unlock matches
+<a href=#476 id=476 data-nosnippet>476</a>        // the lock call that created this guard.
+<a href=#477 id=477 data-nosnippet>477</a>        </span><span class="kw">unsafe </span>{ ffi::ferrompi_win_unlock(<span class="self">self</span>.rank, <span class="self">self</span>.window.win_handle) };
+<a href=#478 id=478 data-nosnippet>478</a>    }
+<a href=#479 id=479 data-nosnippet>479</a>}
+<a href=#480 id=480 data-nosnippet>480</a>
+<a href=#481 id=481 data-nosnippet>481</a><span class="doccomment">/// RAII guard for a lock-all window lock.
+<a href=#482 id=482 data-nosnippet>482</a>///
+<a href=#483 id=483 data-nosnippet>483</a>/// Created by [`SharedWindow::lock_all()`]. When dropped, all locks
+<a href=#484 id=484 data-nosnippet>484</a>/// are automatically released via `MPI_Win_unlock_all`.
+<a href=#485 id=485 data-nosnippet>485</a>///
+<a href=#486 id=486 data-nosnippet>486</a>/// # Example
+<a href=#487 id=487 data-nosnippet>487</a>///
+<a href=#488 id=488 data-nosnippet>488</a>/// ```no_run
+<a href=#489 id=489 data-nosnippet>489</a>/// # use ferrompi::{Mpi, SharedWindow};
+<a href=#490 id=490 data-nosnippet>490</a>/// # let mpi = Mpi::init().unwrap();
+<a href=#491 id=491 data-nosnippet>491</a>/// # let node = mpi.world().split_shared().unwrap();
+<a href=#492 id=492 data-nosnippet>492</a>/// # let win = SharedWindow::&lt;f64&gt;::allocate(&amp;node, 100).unwrap();
+<a href=#493 id=493 data-nosnippet>493</a>/// {
+<a href=#494 id=494 data-nosnippet>494</a>///     let guard = win.lock_all().unwrap();
+<a href=#495 id=495 data-nosnippet>495</a>///     // Access shared memory from any rank
+<a href=#496 id=496 data-nosnippet>496</a>///     guard.flush_all().unwrap();
+<a href=#497 id=497 data-nosnippet>497</a>/// } // All locks released here
+<a href=#498 id=498 data-nosnippet>498</a>/// ```
+<a href=#499 id=499 data-nosnippet>499</a></span><span class="kw">pub struct </span>LockAllGuard&lt;<span class="lifetime">'a</span>, T: MpiDatatype&gt; {
+<a href=#500 id=500 data-nosnippet>500</a>    window: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>SharedWindow&lt;T&gt;,
+<a href=#501 id=501 data-nosnippet>501</a>}
+<a href=#502 id=502 data-nosnippet>502</a>
+<a href=#503 id=503 data-nosnippet>503</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; LockAllGuard&lt;<span class="lifetime">'_</span>, T&gt; {
+<a href=#504 id=504 data-nosnippet>504</a>    <span class="doccomment">/// Flush all pending RMA operations to all ranks.
+<a href=#505 id=505 data-nosnippet>505</a>    ///
+<a href=#506 id=506 data-nosnippet>506</a>    /// Ensures that all preceding RMA operations issued to any rank
+<a href=#507 id=507 data-nosnippet>507</a>    /// in the window are completed at their respective targets.
+<a href=#508 id=508 data-nosnippet>508</a>    ///
+<a href=#509 id=509 data-nosnippet>509</a>    /// # Errors
+<a href=#510 id=510 data-nosnippet>510</a>    ///
+<a href=#511 id=511 data-nosnippet>511</a>    /// Returns an error if the MPI flush_all operation fails.
+<a href=#512 id=512 data-nosnippet>512</a>    </span><span class="kw">pub fn </span>flush_all(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+<a href=#513 id=513 data-nosnippet>513</a>        <span class="comment">// SAFETY: The window handle is valid (borrowed from SharedWindow)
+<a href=#514 id=514 data-nosnippet>514</a>        // and all ranks were locked in the constructor.
+<a href=#515 id=515 data-nosnippet>515</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_flush_all(<span class="self">self</span>.window.win_handle) };
+<a href=#516 id=516 data-nosnippet>516</a>        Error::check(ret)
+<a href=#517 id=517 data-nosnippet>517</a>    }
+<a href=#518 id=518 data-nosnippet>518</a>
+<a href=#519 id=519 data-nosnippet>519</a>    <span class="doccomment">/// Flush pending RMA operations to a specific rank.
+<a href=#520 id=520 data-nosnippet>520</a>    ///
+<a href=#521 id=521 data-nosnippet>521</a>    /// Ensures that all preceding RMA operations issued to the specified
+<a href=#522 id=522 data-nosnippet>522</a>    /// rank are completed at the target.
+<a href=#523 id=523 data-nosnippet>523</a>    ///
+<a href=#524 id=524 data-nosnippet>524</a>    /// # Arguments
+<a href=#525 id=525 data-nosnippet>525</a>    ///
+<a href=#526 id=526 data-nosnippet>526</a>    /// * `rank` - The rank to flush (0-based)
+<a href=#527 id=527 data-nosnippet>527</a>    ///
+<a href=#528 id=528 data-nosnippet>528</a>    /// # Errors
+<a href=#529 id=529 data-nosnippet>529</a>    ///
+<a href=#530 id=530 data-nosnippet>530</a>    /// Returns an error if the MPI flush operation fails.
+<a href=#531 id=531 data-nosnippet>531</a>    </span><span class="kw">pub fn </span>flush(<span class="kw-2">&amp;</span><span class="self">self</span>, rank: i32) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+<a href=#532 id=532 data-nosnippet>532</a>        <span class="comment">// SAFETY: The window handle is valid (borrowed from SharedWindow)
+<a href=#533 id=533 data-nosnippet>533</a>        // and all ranks were locked in the constructor.
+<a href=#534 id=534 data-nosnippet>534</a>        </span><span class="kw">let </span>ret = <span class="kw">unsafe </span>{ ffi::ferrompi_win_flush(rank, <span class="self">self</span>.window.win_handle) };
+<a href=#535 id=535 data-nosnippet>535</a>        Error::check(ret)
+<a href=#536 id=536 data-nosnippet>536</a>    }
+<a href=#537 id=537 data-nosnippet>537</a>}
+<a href=#538 id=538 data-nosnippet>538</a>
+<a href=#539 id=539 data-nosnippet>539</a><span class="kw">impl</span>&lt;T: MpiDatatype&gt; Drop <span class="kw">for </span>LockAllGuard&lt;<span class="lifetime">'_</span>, T&gt; {
+<a href=#540 id=540 data-nosnippet>540</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="comment">// SAFETY: The window handle is valid (borrowed from SharedWindow)
+<a href=#542 id=542 data-nosnippet>542</a>        // and all ranks were locked in the constructor. This unlock_all
+<a href=#543 id=543 data-nosnippet>543</a>        // matches the lock_all call that created this guard.
+<a href=#544 id=544 data-nosnippet>544</a>        </span><span class="kw">unsafe </span>{ ffi::ferrompi_win_unlock_all(<span class="self">self</span>.window.win_handle) };
+<a href=#545 id=545 data-nosnippet>545</a>    }
+<a href=#546 id=546 data-nosnippet>546</a>}
+<a href=#547 id=547 data-nosnippet>547</a>
+<a href=#548 id=548 data-nosnippet>548</a><span class="attr">#[cfg(test)]
+<a href=#549 id=549 data-nosnippet>549</a></span><span class="kw">mod </span>tests {
+<a href=#550 id=550 data-nosnippet>550</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#551 id=551 data-nosnippet>551</a>
+<a href=#552 id=552 data-nosnippet>552</a>    <span class="attr">#[test]
+<a href=#553 id=553 data-nosnippet>553</a>    </span><span class="kw">fn </span>lock_type_equality() {
+<a href=#554 id=554 data-nosnippet>554</a>        <span class="macro">assert_eq!</span>(LockType::Exclusive, LockType::Exclusive);
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="macro">assert_eq!</span>(LockType::Shared, LockType::Shared);
+<a href=#556 id=556 data-nosnippet>556</a>        <span class="macro">assert_ne!</span>(LockType::Exclusive, LockType::Shared);
+<a href=#557 id=557 data-nosnippet>557</a>    }
+<a href=#558 id=558 data-nosnippet>558</a>
+<a href=#559 id=559 data-nosnippet>559</a>    <span class="attr">#[test]
+<a href=#560 id=560 data-nosnippet>560</a>    </span><span class="kw">fn </span>lock_type_debug() {
+<a href=#561 id=561 data-nosnippet>561</a>        <span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{:?}"</span>, LockType::Exclusive), <span class="string">"Exclusive"</span>);
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="macro">assert_eq!</span>(<span class="macro">format!</span>(<span class="string">"{:?}"</span>, LockType::Shared), <span class="string">"Shared"</span>);
+<a href=#563 id=563 data-nosnippet>563</a>    }
+<a href=#564 id=564 data-nosnippet>564</a>
+<a href=#565 id=565 data-nosnippet>565</a>    <span class="attr">#[test]
+<a href=#566 id=566 data-nosnippet>566</a>    #[allow(clippy::clone_on_copy)]
+<a href=#567 id=567 data-nosnippet>567</a>    </span><span class="kw">fn </span>lock_type_clone_copy() {
+<a href=#568 id=568 data-nosnippet>568</a>        <span class="kw">let </span>original = LockType::Exclusive;
+<a href=#569 id=569 data-nosnippet>569</a>        <span class="kw">let </span>copied = original; <span class="comment">// Copy
+<a href=#570 id=570 data-nosnippet>570</a>        </span><span class="kw">let </span>cloned = original.clone(); <span class="comment">// Clone
+<a href=#571 id=571 data-nosnippet>571</a>        </span><span class="macro">assert_eq!</span>(original, copied);
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="macro">assert_eq!</span>(original, cloned);
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>        <span class="kw">let </span>original = LockType::Shared;
+<a href=#575 id=575 data-nosnippet>575</a>        <span class="kw">let </span>copied = original; <span class="comment">// Copy
+<a href=#576 id=576 data-nosnippet>576</a>        </span><span class="kw">let </span>cloned = original.clone(); <span class="comment">// Clone
+<a href=#577 id=577 data-nosnippet>577</a>        </span><span class="macro">assert_eq!</span>(original, copied);
+<a href=#578 id=578 data-nosnippet>578</a>        <span class="macro">assert_eq!</span>(original, cloned);
+<a href=#579 id=579 data-nosnippet>579</a>    }
+<a href=#580 id=580 data-nosnippet>580</a>}
+</code></pre></div></section></main></body></html>

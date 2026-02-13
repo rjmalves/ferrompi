@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DatatypeTag","Error","LockType","MpiErrorClass","ReduceOp","SplitType","ThreadLevel"],"mod":["slurm"],"struct":["Communicator","Info","LockAllGuard","LockGuard","Mpi","PersistentRequest","Request","SharedWindow","Status"],"trait":["MpiDatatype"],"type":["Result"]};
