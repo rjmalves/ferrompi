@@ -87,6 +87,10 @@ path = "examples/test_nonblocking_collectives.rs"
 name = "test_lifecycle"
 path = "examples/test_lifecycle.rs"
 
+[[example]]
+name = "test_persistent"
+path = "examples/test_persistent.rs"
+
 [dependencies]
 thiserror = "2.0"
 

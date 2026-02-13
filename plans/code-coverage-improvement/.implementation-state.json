@@ -1,7 +1,7 @@
 {
   "plan": "code-coverage-improvement",
   "created": "2026-02-13",
-  "last_updated": "2026-02-13T18:50:00Z",
+  "last_updated": "2026-02-13T21:00:00Z",
   "tickets": {
     "ticket-001": {
       "title": "Coverage runner script",
@@ -62,16 +62,16 @@
     "ticket-009": {
       "title": "Persistent collective operations",
       "epic": "epic-05-comm-persistent",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T21:00:00Z"
     },
     "ticket-010": {
       "title": "Persistent request drop coverage",
       "epic": "epic-05-comm-persistent",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T21:00:00Z"
     },
     "ticket-011": {
       "title": "Communicator management coverage",

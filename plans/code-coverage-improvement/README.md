@@ -16,8 +16,8 @@
 | 006    | Blocking       | Buffer validation unit tests      | `completed` | 002          |
 | 007    | Nonblocking    | Nonblocking collective operations | `completed` | 001          |
 | 008    | Nonblocking    | Request coverage extras           | `completed` | 001, 002     |
-| 009    | Persistent     | Persistent collective operations  | `pending`   | 001          |
-| 010    | Persistent     | Persistent request drop coverage  | `pending`   | 009          |
+| 009    | Persistent     | Persistent collective operations  | `completed` | 001          |
+| 010    | Persistent     | Persistent request drop coverage  | `completed` | 009          |
 | 011    | Comm Mgmt      | Communicator management coverage  | `pending`   | 001, 002     |
 | 012    | Support        | Error and Info module coverage    | `pending`   | 001          |
 | 013    | RMA            | SharedWindow coverage             | `pending`   | 001          |
