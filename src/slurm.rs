@@ -68,3 +68,75 @@ pub fn node_name() -> Option<String> {
 pub fn node_list() -> Option<String> {
     env::var("SLURM_NODELIST").ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_in_slurm_by_default() {
+        // In a test environment, we're not in a SLURM job
+        // (unless running on a cluster, but CI won't be)
+        if std::env::var("SLURM_JOB_ID").is_err() {
+            assert!(!is_slurm_job());
+            assert!(job_id().is_none());
+            assert!(local_rank().is_none());
+        }
+    }
+
+    /// Tests that mutate environment variables are combined into a single test
+    /// to avoid data races when tests run in parallel. `env::set_var` and
+    /// `env::remove_var` are not thread-safe — multiple tests touching the same
+    /// env vars concurrently will produce flaky results.
+    #[test]
+    fn slurm_env_var_parsing() {
+        // --- local_size: parses SLURM_TASKS_PER_NODE "4(x2)" format ---
+        unsafe {
+            std::env::set_var("SLURM_TASKS_PER_NODE", "4(x2)");
+            std::env::remove_var("SLURM_NTASKS_PER_NODE");
+        }
+        assert_eq!(local_size(), Some(4));
+
+        // --- local_size: SLURM_NTASKS_PER_NODE takes priority ---
+        unsafe {
+            std::env::set_var("SLURM_NTASKS_PER_NODE", "8");
+            std::env::set_var("SLURM_TASKS_PER_NODE", "4(x2)");
+        }
+        assert_eq!(local_size(), Some(8));
+
+        // --- local_size: returns None when neither var is set ---
+        unsafe {
+            std::env::remove_var("SLURM_NTASKS_PER_NODE");
+            std::env::remove_var("SLURM_TASKS_PER_NODE");
+        }
+        assert_eq!(local_size(), None);
+
+        // --- is_slurm_job: detects SLURM_JOB_ID ---
+        unsafe {
+            std::env::set_var("SLURM_JOB_ID", "12345");
+        }
+        assert!(is_slurm_job());
+        assert_eq!(job_id(), Some("12345".to_string()));
+        unsafe {
+            std::env::remove_var("SLURM_JOB_ID");
+        }
+
+        // --- num_nodes: parses SLURM_NNODES ---
+        unsafe {
+            std::env::set_var("SLURM_NNODES", "16");
+        }
+        assert_eq!(num_nodes(), Some(16));
+        unsafe {
+            std::env::remove_var("SLURM_NNODES");
+        }
+
+        // --- cpus_per_task: parses SLURM_CPUS_PER_TASK ---
+        unsafe {
+            std::env::set_var("SLURM_CPUS_PER_TASK", "4");
+        }
+        assert_eq!(cpus_per_task(), Some(4));
+        unsafe {
+            std::env::remove_var("SLURM_CPUS_PER_TASK");
+        }
+    }
+}

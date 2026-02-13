@@ -102,6 +102,34 @@ mod tests {
     }
 
     #[test]
+    fn datatype_tags_match_c_defines() {
+        // Verify each Rust type's TAG constant maps to the correct C-side define
+        assert_eq!(f32::TAG as i32, 0); // FERROMPI_F32
+        assert_eq!(f64::TAG as i32, 1); // FERROMPI_F64
+        assert_eq!(i32::TAG as i32, 2); // FERROMPI_I32
+        assert_eq!(i64::TAG as i32, 3); // FERROMPI_I64
+        assert_eq!(u8::TAG as i32, 4); // FERROMPI_U8
+        assert_eq!(u32::TAG as i32, 5); // FERROMPI_U32
+        assert_eq!(u64::TAG as i32, 6); // FERROMPI_U64
+    }
+
+    #[test]
+    fn datatype_tag_values_are_sequential() {
+        let tags = [
+            DatatypeTag::F32,
+            DatatypeTag::F64,
+            DatatypeTag::I32,
+            DatatypeTag::I64,
+            DatatypeTag::U8,
+            DatatypeTag::U32,
+            DatatypeTag::U64,
+        ];
+        for (i, tag) in tags.iter().enumerate() {
+            assert_eq!(*tag as i32, i as i32, "Tag {tag:?} should have value {i}");
+        }
+    }
+
+    #[test]
     fn trait_is_implemented() {
         // Compile-time check that all types implement MpiDatatype
         fn assert_mpi_datatype<T: MpiDatatype>() {}

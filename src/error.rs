@@ -173,6 +173,9 @@ impl Error {
     /// Calls `ferrompi_error_info` to obtain the error class and human-readable
     /// message from the MPI runtime.
     ///
+    /// Calls `ferrompi_error_info` to obtain the error class and human-readable
+    /// message from the MPI runtime.
+    ///
     /// # Panics
     ///
     /// Panics if called with `MPI_SUCCESS` (code 0).
@@ -221,5 +224,85 @@ impl Error {
         } else {
             Err(Error::from_code(code))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_success_returns_ok() {
+        assert!(Error::check(0).is_ok());
+    }
+
+    #[test]
+    fn error_class_from_known_values() {
+        assert_eq!(MpiErrorClass::from_raw(0), MpiErrorClass::Success);
+        assert_eq!(MpiErrorClass::from_raw(1), MpiErrorClass::Buffer);
+        assert_eq!(MpiErrorClass::from_raw(2), MpiErrorClass::Count);
+        assert_eq!(MpiErrorClass::from_raw(3), MpiErrorClass::Type);
+        assert_eq!(MpiErrorClass::from_raw(4), MpiErrorClass::Tag);
+        assert_eq!(MpiErrorClass::from_raw(5), MpiErrorClass::Comm);
+        assert_eq!(MpiErrorClass::from_raw(6), MpiErrorClass::Rank);
+        assert_eq!(MpiErrorClass::from_raw(7), MpiErrorClass::Request);
+        assert_eq!(MpiErrorClass::from_raw(8), MpiErrorClass::Root);
+        assert_eq!(MpiErrorClass::from_raw(9), MpiErrorClass::Group);
+        assert_eq!(MpiErrorClass::from_raw(10), MpiErrorClass::Op);
+        assert_eq!(MpiErrorClass::from_raw(11), MpiErrorClass::Topology);
+        assert_eq!(MpiErrorClass::from_raw(12), MpiErrorClass::Dims);
+        assert_eq!(MpiErrorClass::from_raw(13), MpiErrorClass::Arg);
+        assert_eq!(MpiErrorClass::from_raw(14), MpiErrorClass::Unknown);
+        assert_eq!(MpiErrorClass::from_raw(15), MpiErrorClass::Truncate);
+        assert_eq!(MpiErrorClass::from_raw(16), MpiErrorClass::Other);
+        assert_eq!(MpiErrorClass::from_raw(17), MpiErrorClass::Intern);
+        assert_eq!(MpiErrorClass::from_raw(18), MpiErrorClass::InStatus);
+        assert_eq!(MpiErrorClass::from_raw(19), MpiErrorClass::Pending);
+        assert_eq!(MpiErrorClass::from_raw(27), MpiErrorClass::File);
+        assert_eq!(MpiErrorClass::from_raw(28), MpiErrorClass::Info);
+        assert_eq!(MpiErrorClass::from_raw(45), MpiErrorClass::Win);
+    }
+
+    #[test]
+    fn error_class_unknown_raw_value() {
+        assert_eq!(MpiErrorClass::from_raw(999), MpiErrorClass::Raw(999));
+        assert_eq!(MpiErrorClass::from_raw(-1), MpiErrorClass::Raw(-1));
+    }
+
+    #[test]
+    fn error_class_display_formats() {
+        assert_eq!(format!("{}", MpiErrorClass::Success), "SUCCESS");
+        assert_eq!(format!("{}", MpiErrorClass::Buffer), "ERR_BUFFER");
+        assert_eq!(format!("{}", MpiErrorClass::Comm), "ERR_COMM");
+        assert_eq!(format!("{}", MpiErrorClass::Rank), "ERR_RANK");
+        assert_eq!(format!("{}", MpiErrorClass::Raw(42)), "ERR_CLASS(42)");
+    }
+
+    #[test]
+    fn error_display_formats_correctly() {
+        let err = Error::InvalidBuffer;
+        assert_eq!(format!("{err}"), "Invalid buffer");
+
+        let err = Error::AlreadyInitialized;
+        assert_eq!(format!("{err}"), "MPI has already been initialized");
+
+        let err = Error::NotSupported("persistent collectives".to_string());
+        assert_eq!(
+            format!("{err}"),
+            "Operation not supported: persistent collectives"
+        );
+
+        let err = Error::Internal("test failure".to_string());
+        assert_eq!(format!("{err}"), "Internal error: test failure");
+
+        let err = Error::Mpi {
+            class: MpiErrorClass::Rank,
+            code: 6,
+            message: "invalid rank".to_string(),
+        };
+        assert_eq!(
+            format!("{err}"),
+            "MPI error: invalid rank (class=ERR_RANK, code=6)"
+        );
     }
 }
