@@ -54,9 +54,16 @@
 //! ## Capabilities
 //!
 //! - **Generic API**: All operations work with any [`MpiDatatype`] (`f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`)
-//! - **Basic collectives**: barrier, broadcast, reduce, allreduce, gather, scatter
-//! - **Nonblocking collectives**: ibcast, iallreduce with request handles
-//! - **Persistent collectives** (MPI 4.0+): `bcast_init`, `allreduce_init`, etc.
+//! - **Blocking collectives**: barrier, broadcast, reduce, allreduce, gather, scatter, allgather,
+//!   alltoall, scan, exscan, reduce\_scatter\_block, plus V-variants (gatherv, scatterv, allgatherv, alltoallv)
+//! - **Nonblocking collectives**: All 13 `i`-prefixed variants with [`Request`] handles
+//! - **Persistent collectives** (MPI 4.0+): All 11+ `_init` variants with [`PersistentRequest`] handles
+//! - **Scalar and in-place variants**: `reduce_scalar`, `allreduce_scalar`, `reduce_inplace`,
+//!   `allreduce_inplace`, `scan_scalar`, `exscan_scalar`
+//! - **Point-to-point**: `send`, `recv`, `isend`, `irecv`, `sendrecv`, `probe`, `iprobe`
+//! - **Communicator management**: `split`, `split_type`, `split_shared`, `duplicate`
+//! - **Shared memory windows** (feature `rma`): [`SharedWindow<T>`] with RAII lock guards
+//! - **SLURM helpers** (feature `numa`): Job topology queries via `slurm` module
 //! - **Rich error handling**: [`MpiErrorClass`] categorization with messages from the MPI runtime
 //!
 //! ## Thread Safety
