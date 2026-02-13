@@ -80,6 +80,10 @@ name = "test_blocking_extra"
 path = "examples/test_blocking_extra.rs"
 
 [[example]]
+name = "test_nonblocking_collectives"
+path = "examples/test_nonblocking_collectives.rs"
+
+[[example]]
 name = "test_lifecycle"
 path = "examples/test_lifecycle.rs"
 

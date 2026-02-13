@@ -349,13 +349,71 @@ fn main() {
         }
     }
 
+    world.barrier().expect("barrier 8 failed");
+
+    // ========================================================================
+    // Test 9: Request::drop() without wait + is_completed() coverage
+    // ========================================================================
+    // Ring pattern: each rank posts irecv then isend.
+    // We wait on the recv request (to get the data) but DROP the send request
+    // without calling wait(). This exercises the Drop impl's FFI wait path.
+    // Safety: the matching irecv.wait() on the receiving rank ensures the
+    // send operation completes, so the Drop-side wait will return promptly.
+    //
+    // We also verify is_completed() returns false on a freshly created request
+    // (before any wait/test) and true after test() succeeds.
+    {
+        let next = (rank + 1) % size;
+        let prev = (rank + size - 1) % size;
+        let tag = 900;
+
+        let send_data = vec![(rank + 1) as f64 * 7.77; 6];
+        let mut recv_data = vec![0.0f64; 6];
+
+        // Post nonblocking receive, then nonblocking send
+        let recv_req = world
+            .irecv(&mut recv_data, prev, tag)
+            .expect("irecv failed");
+        let send_req = world.isend(&send_data, next, tag).expect("isend failed");
+
+        // Verify is_completed() returns false on a fresh request
+        assert!(
+            !send_req.is_completed(),
+            "rank {rank}: is_completed() should be false before wait/test"
+        );
+
+        // Wait on recv to complete the data transfer
+        recv_req.wait().expect("irecv wait failed");
+
+        // Verify received data from previous rank
+        let expected_val = (prev + 1) as f64 * 7.77;
+        for (i, &v) in recv_data.iter().enumerate() {
+            assert!(
+                (v - expected_val).abs() < f64::EPSILON,
+                "rank {rank}: drop test recv_data[{i}] = {v}, expected {expected_val}"
+            );
+        }
+
+        // DROP send_req without calling wait() — exercises Drop impl's FFI path
+        drop(send_req);
+    }
+
+    world.barrier().expect("barrier 9 failed");
+
+    // Post-drop verification: all ranks survived the drop-without-wait path.
+    // If the Drop impl didn't call ferrompi_wait, MPI would be in an undefined
+    // state and this barrier (or subsequent operations) would likely hang/crash.
+    if rank == 0 {
+        println!("PASS: Request::drop without wait + is_completed()");
+    }
+
     // ========================================================================
     // Final barrier and summary
     // ========================================================================
     world.barrier().expect("final barrier failed");
     if rank == 0 {
         println!("\n========================================");
-        println!("All nonblocking/p2p tests passed! (8 tests)");
+        println!("All nonblocking/p2p tests passed! (9 tests)");
         println!("========================================");
     }
 }

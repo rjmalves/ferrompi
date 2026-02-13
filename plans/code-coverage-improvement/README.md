@@ -14,8 +14,8 @@
 | 004    | Blocking       | Blocking collective extras        | `completed` | 001, 002     |
 | 005    | Blocking       | Point-to-point coverage           | `completed` | 001, 002     |
 | 006    | Blocking       | Buffer validation unit tests      | `completed` | 002          |
-| 007    | Nonblocking    | Nonblocking collective operations | `pending`   | 001          |
-| 008    | Nonblocking    | Request coverage extras           | `pending`   | 001, 002     |
+| 007    | Nonblocking    | Nonblocking collective operations | `completed` | 001          |
+| 008    | Nonblocking    | Request coverage extras           | `completed` | 001, 002     |
 | 009    | Persistent     | Persistent collective operations  | `pending`   | 001          |
 | 010    | Persistent     | Persistent request drop coverage  | `pending`   | 009          |
 | 011    | Comm Mgmt      | Communicator management coverage  | `pending`   | 001, 002     |
