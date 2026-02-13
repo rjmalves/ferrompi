@@ -43,9 +43,25 @@ name = "hybrid_openmp"
 path = "examples/hybrid_openmp.rs"
 
 [[example]]
+name = "comm_split"
+path = "examples/comm_split.rs"
+
+[[example]]
 name = "shared_memory"
 path = "examples/shared_memory.rs"
 required-features = ["rma"]
+
+[[example]]
+name = "test_collectives"
+path = "examples/test_collectives.rs"
+
+[[example]]
+name = "test_nonblocking"
+path = "examples/test_nonblocking.rs"
+
+[[example]]
+name = "test_comm_split"
+path = "examples/test_comm_split.rs"
 
 [dependencies]
 thiserror = "2.0"
