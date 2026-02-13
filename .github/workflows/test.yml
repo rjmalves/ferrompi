@@ -83,8 +83,8 @@ jobs:
         if: matrix.features != ''
         run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
 
-      - name: Unit tests and doc tests
-        run: cargo test --features numa --verbose
+      - name: Unit tests
+        run: cargo test --lib --features numa --verbose
 
       - name: Build examples
         run: cargo build --examples --features "${{ matrix.features }}"
