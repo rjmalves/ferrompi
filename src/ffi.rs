@@ -223,6 +223,24 @@ extern "C" {
         comm: int32_t,
     ) -> c_int;
 
+    pub fn ferrompi_alltoall(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_reduce_scatter_block(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
     // ============================================================
     // Generic V-Collectives (variable-count)
     // ============================================================

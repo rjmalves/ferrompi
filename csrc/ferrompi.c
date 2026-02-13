@@ -848,6 +848,42 @@ int ferrompi_scatter(
                        root, comm);
 }
 
+int ferrompi_alltoall(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+#if MPI_VERSION >= 4
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_Alltoall_c(sendbuf, (MPI_Count)sendcount, dt,
+                              recvbuf, (MPI_Count)recvcount, dt, comm);
+    }
+#endif
+    return MPI_Alltoall(sendbuf, (int)sendcount, dt,
+                        recvbuf, (int)recvcount, dt, comm);
+}
+
+int ferrompi_reduce_scatter_block(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    MPI_Op mpi_op = get_op(op);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    return MPI_Reduce_scatter_block(sendbuf, recvbuf, (int)recvcount, dt, mpi_op, comm);
+}
+
 /* ============================================================
  * Generic V-Collectives (variable-count)
  * ============================================================ */

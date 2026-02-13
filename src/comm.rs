@@ -950,6 +950,98 @@ impl Communicator {
         Error::check(ret)
     }
 
+    /// All-to-all personalized communication.
+    ///
+    /// Each process sends `send.len() / size` elements to every other process
+    /// and receives the same amount from each.
+    ///
+    /// `send` must have exactly `count * size` elements, where `count`
+    /// is the number of elements sent to each process.
+    /// `recv` must have the same length as `send`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()` or
+    /// `send.len()` is not evenly divisible by the communicator size.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![world.rank() as f64; size * 3];
+    /// let mut recv = vec![0.0f64; size * 3];
+    /// world.alltoall(&send, &mut recv).unwrap();
+    /// ```
+    pub fn alltoall<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<()> {
+        let size = self.size() as usize;
+        if send.len() != recv.len() || send.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let count = (send.len() / size) as i64;
+        let ret = unsafe {
+            ffi::ferrompi_alltoall(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                count,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                count,
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Reduce-scatter with uniform block size.
+    ///
+    /// Performs an element-wise reduction across all processes, then scatters
+    /// the result so that each process receives `recv.len()` elements.
+    /// `send` must have exactly `recv.len() * size` elements.
+    ///
+    /// This is equivalent to [`allreduce`](Self::allreduce) followed by each
+    /// process keeping only its portion, but is more efficient because the MPI
+    /// implementation can fuse the two operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len() * size`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![1.0f64; size * 5];
+    /// let mut recv = vec![0.0f64; 5];
+    /// world.reduce_scatter_block(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// ```
+    pub fn reduce_scatter_block<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<()> {
+        let size = self.size() as usize;
+        if send.len() != recv.len() * size {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            ffi::ferrompi_reduce_scatter_block(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
     // ========================================================================
     // Generic V-Collectives (variable-count)
     // ========================================================================

@@ -409,6 +409,40 @@ int ferrompi_allgather(const void* sendbuf, int64_t sendcount, void* recvbuf, in
 /** Scatter (generic) */
 int ferrompi_scatter(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm);
 
+/**
+ * All-to-all personalized communication (MPI_Alltoall).
+ *
+ * Each process sends sendcount elements to every other process and receives
+ * recvcount elements from each. Uses MPI_Alltoall_c for counts exceeding
+ * INT_MAX on MPI 4.0+.
+ *
+ * @param sendbuf Send buffer (sendcount * size elements)
+ * @param sendcount Number of elements sent to each process
+ * @param recvbuf Receive buffer (recvcount * size elements)
+ * @param recvcount Number of elements received from each process
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_alltoall(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm);
+
+/**
+ * Reduce-scatter with uniform block size (MPI_Reduce_scatter_block).
+ *
+ * Equivalent to a reduction followed by a scatter where each process
+ * receives the same number of elements (recvcount). The send buffer
+ * must contain recvcount * size elements.
+ *
+ * @param sendbuf Send buffer (recvcount * size elements)
+ * @param recvbuf Receive buffer (recvcount elements)
+ * @param recvcount Number of elements per process after scatter
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param op Reduction operation
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_reduce_scatter_block(const void* sendbuf, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t op, int32_t comm);
+
 /* ============================================================
  * Generic V-Collectives (variable-count)
  * ============================================================
