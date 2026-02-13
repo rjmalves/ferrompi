@@ -13,9 +13,20 @@ env:
 
 jobs:
   test:
-    name: Test Suite
+    name: Test (${{ matrix.mpi }}, ${{ matrix.features == '' && 'default' || matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mpi: [mpich, openmpi]
+        features: ["", "rma"]
+        include:
+          - mpi: mpich
+            pkg: mpich libmpich-dev
+          - mpi: openmpi
+            pkg: libopenmpi-dev openmpi-bin
 
     steps:
       - name: Checkout code
@@ -33,52 +44,59 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.mpi }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.mpi }}-
             ${{ runner.os }}-cargo-
 
       - name: Cache cargo build
         uses: actions/cache@v5
         with:
           path: target
-          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          key: ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-target-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-
 
       - name: Install MPI
         run: |
           sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config libhwloc-dev libpmix-dev libucx-dev
+          sudo apt-get install -y ${{ matrix.pkg }} pkg-config libhwloc-dev
           mpiexec --version
+
+      - name: Configure OpenMPI environment
+        if: matrix.mpi == 'openmpi'
+        run: |
+          echo "OMPI_MCA_rmaps_base_oversubscribe=1" >> "$GITHUB_ENV"
+          echo "OMPI_ALLOW_RUN_AS_ROOT=1" >> "$GITHUB_ENV"
+          echo "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1" >> "$GITHUB_ENV"
+          echo "OMPI_MCA_btl=self,tcp" >> "$GITHUB_ENV"
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
 
-      - name: Build library
-        run: cargo build --verbose --lib
+      - name: Clippy (with ${{ matrix.features }} features)
+        if: matrix.features != ''
+        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
+
+      - name: Unit tests and doc tests
+        run: cargo test --features numa --verbose
 
       - name: Build examples
-        run: cargo build --verbose --examples
+        run: cargo build --examples --features "${{ matrix.features }}"
 
-      - name: Run unit tests
-        run: cargo test --lib --verbose
-
-      - name: Run doc tests
-        run: cargo test --doc --verbose
-
-      - name: Run examples with MPI
+      - name: MPI integration tests
         run: |
-          for example in hello_world ring allreduce nonblocking persistent_bcast; do
-            echo "Running example: $example"
-            mpiexec -n 4 ./target/debug/examples/$example || exit 1
-          done
+          chmod +x tests/run_mpi_tests.sh
+          MPI_NP=2 ./tests/run_mpi_tests.sh "${{ matrix.features }}"
 
       - name: Build documentation
-        run: cargo doc --no-deps --all-features
+        if: matrix.features == 'rma'
+        run: cargo doc --no-deps --features rma
         env:
           RUSTDOCFLAGS: -D warnings
 

@@ -28,6 +28,12 @@ NP="${MPI_NP:-4}"
 MPIEXEC="${MPIEXEC:-mpiexec}"
 BUILD_MODE="${BUILD_MODE:-debug}"
 
+# Auto-detect OpenMPI and add --oversubscribe to avoid binding errors in CI
+MPIEXEC_ARGS=""
+if "$MPIEXEC" --version 2>&1 | grep -q "Open MPI"; then
+    MPIEXEC_ARGS="--oversubscribe"
+fi
+
 PASSED=0
 FAILED=0
 SKIPPED=0
@@ -60,10 +66,11 @@ print_header() {
     echo -e "${BOLD}║       FerroMPI Integration Test Runner            ║${RESET}"
     echo -e "${BOLD}╚════════════════════════════════════════════════════╝${RESET}"
     echo ""
-    echo -e "  Processes:  ${CYAN}${NP}${RESET}"
-    echo -e "  Features:   ${CYAN}${FEATURES:-default}${RESET}"
-    echo -e "  Build mode: ${CYAN}${BUILD_MODE}${RESET}"
-    echo -e "  mpiexec:    ${CYAN}${MPIEXEC}${RESET}"
+    echo -e "  Processes:   ${CYAN}${NP}${RESET}"
+    echo -e "  Features:    ${CYAN}${FEATURES:-default}${RESET}"
+    echo -e "  Build mode:  ${CYAN}${BUILD_MODE}${RESET}"
+    echo -e "  mpiexec:     ${CYAN}${MPIEXEC}${RESET}"
+    echo -e "  mpiexec args:${CYAN}${MPIEXEC_ARGS:- (none)}${RESET}"
     echo ""
 }
 
@@ -120,7 +127,8 @@ run_test() {
 
     local output
     local exit_code=0
-    output=$("$MPIEXEC" -n "$procs" "$binary" 2>&1) || exit_code=$?
+    # shellcheck disable=SC2086
+    output=$("$MPIEXEC" $MPIEXEC_ARGS -n "$procs" "$binary" 2>&1) || exit_code=$?
 
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}PASS${RESET}"
@@ -168,7 +176,8 @@ run_test comm_split
 # persistent_bcast may fail on MPI < 4.0 — run but don't count failure as fatal
 echo ""
 echo -n -e "  Running ${BOLD}persistent_bcast${RESET} (n=${NP}, MPI 4.0+)... "
-PERSIST_OUTPUT=$("$MPIEXEC" -n "$NP" "./target/${BUILD_MODE}/examples/persistent_bcast" 2>&1) || true
+# shellcheck disable=SC2086
+PERSIST_OUTPUT=$("$MPIEXEC" $MPIEXEC_ARGS -n "$NP" "./target/${BUILD_MODE}/examples/persistent_bcast" 2>&1) || true
 echo -e "${YELLOW}DONE${RESET} (MPI 4.0+ required; may show 'not available')"
 
 # hybrid_openmp — run as smoke test
