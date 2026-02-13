@@ -184,8 +184,43 @@ mod tests {
             std::env::set_var("SLURM_LOCALID", "not_a_number");
         }
         assert_eq!(local_rank(), None);
+
+        // --- local_rank: parses valid numeric value ---
+        unsafe {
+            std::env::set_var("SLURM_LOCALID", "3");
+        }
+        assert_eq!(local_rank(), Some(3));
         unsafe {
             std::env::remove_var("SLURM_LOCALID");
+        }
+
+        // --- local_size: non-numeric NTASKS_PER_NODE falls through to TASKS_PER_NODE ---
+        unsafe {
+            std::env::set_var("SLURM_NTASKS_PER_NODE", "garbage");
+            std::env::set_var("SLURM_TASKS_PER_NODE", "6(x3)");
+        }
+        assert_eq!(local_size(), Some(6));
+        unsafe {
+            std::env::remove_var("SLURM_NTASKS_PER_NODE");
+            std::env::remove_var("SLURM_TASKS_PER_NODE");
+        }
+
+        // --- num_nodes: returns None for non-numeric value ---
+        unsafe {
+            std::env::set_var("SLURM_NNODES", "not_a_number");
+        }
+        assert_eq!(num_nodes(), None);
+        unsafe {
+            std::env::remove_var("SLURM_NNODES");
+        }
+
+        // --- cpus_per_task: returns None for non-numeric value ---
+        unsafe {
+            std::env::set_var("SLURM_CPUS_PER_TASK", "abc");
+        }
+        assert_eq!(cpus_per_task(), None);
+        unsafe {
+            std::env::remove_var("SLURM_CPUS_PER_TASK");
         }
     }
 }
