@@ -47,6 +47,14 @@ name = "comm_split"
 path = "examples/comm_split.rs"
 
 [[example]]
+name = "scan"
+path = "examples/scan.rs"
+
+[[example]]
+name = "gatherv"
+path = "examples/gatherv.rs"
+
+[[example]]
 name = "shared_memory"
 path = "examples/shared_memory.rs"
 required-features = ["rma"]
