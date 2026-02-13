@@ -1,0 +1,105 @@
+{
+  "plan": "code-coverage-improvement",
+  "created": "2026-02-13",
+  "last_updated": "2026-02-13T18:35:00Z",
+  "tickets": {
+    "ticket-001": {
+      "title": "Coverage runner script",
+      "epic": "epic-01-infrastructure",
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T18:20:00Z"
+    },
+    "ticket-002": {
+      "title": "Verify baseline coverage",
+      "epic": "epic-01-infrastructure",
+      "status": "completed",
+      "completed_by": "orchestrator",
+      "completed_at": "2026-02-13T18:35:00Z"
+    },
+    "ticket-003": {
+      "title": "MPI lifecycle test example",
+      "epic": "epic-02-lib-lifecycle",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-004": {
+      "title": "Blocking collective extras",
+      "epic": "epic-03-comm-blocking",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-005": {
+      "title": "Point-to-point coverage",
+      "epic": "epic-03-comm-blocking",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-006": {
+      "title": "Buffer validation unit tests",
+      "epic": "epic-03-comm-blocking",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-007": {
+      "title": "Nonblocking collective operations",
+      "epic": "epic-04-comm-nonblocking",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-008": {
+      "title": "Request coverage extras",
+      "epic": "epic-04-comm-nonblocking",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-009": {
+      "title": "Persistent collective operations",
+      "epic": "epic-05-comm-persistent",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-010": {
+      "title": "Persistent request drop coverage",
+      "epic": "epic-05-comm-persistent",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-011": {
+      "title": "Communicator management coverage",
+      "epic": "epic-06-comm-management",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-012": {
+      "title": "Error and Info module coverage",
+      "epic": "epic-07-support-modules",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-013": {
+      "title": "SharedWindow coverage",
+      "epic": "epic-08-rma-window",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    },
+    "ticket-014": {
+      "title": "SLURM module coverage",
+      "epic": "epic-08-rma-window",
+      "status": "pending",
+      "completed_by": null,
+      "completed_at": null
+    }
+  }
+}
