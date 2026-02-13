@@ -16,7 +16,7 @@
 //! let mut data = vec![0.0f64; 1000];
 //!
 //! // Initialize persistent broadcast (MPI 4.0+)
-//! let mut persistent = world.bcast_init_f64(&mut data, 0).unwrap();
+//! let mut persistent = world.bcast_init(&mut data, 0).unwrap();
 //!
 //! // Run many iterations
 //! for iter in 0..1000 {
@@ -52,7 +52,7 @@ use crate::ffi;
 ///
 /// # Lifecycle
 ///
-/// 1. Create with `comm.bcast_init_f64()` or similar
+/// 1. Create with `comm.bcast_init()` or similar
 /// 2. Start with `start()` or `start_all()`
 /// 3. Wait for completion with `wait()`
 /// 4. Repeat steps 2-3 as needed

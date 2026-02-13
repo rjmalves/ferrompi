@@ -7,21 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-13
+
+### Breaking Changes
+
+- Removed all type-specific methods (`_f64`, `_i32`, etc.) in favor of generic `MpiDatatype` API
+- `Communicator` is now `Send + Sync` for hybrid MPI+threads programs
+- Error type restructured: `Error::MpiError(i32)` → `Error::Mpi { class, code, message }` with `MpiErrorClass` enum providing rich error categorization
+- Removed `InvalidRank`, `InvalidCommunicator`, etc. (now covered by `MpiErrorClass` variants)
+
 ### Added
+
+- Generic `MpiDatatype` trait for `f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`
+- Communicator management: `split()`, `split_type()`, `split_shared()`, `duplicate()`
+- MPI_Info object support with RAII lifecycle (`Info` type)
+- Complete nonblocking point-to-point: `isend`, `irecv`, `sendrecv`
+- Probe/Iprobe: `probe<T>`, `iprobe<T>` with `Status` struct (source, tag, count)
+- Scalar reduce variants: `reduce_scalar`, `allreduce_scalar`
+- In-place reduce variants: `reduce_inplace`, `allreduce_inplace`
+- Scan/Exscan: `scan`, `exscan`, `scan_scalar`, `exscan_scalar` (blocking, nonblocking, persistent)
+- V-collectives: `gatherv`, `scatterv`, `allgatherv`, `alltoallv` (blocking, nonblocking, persistent)
+- Alltoall: `alltoall` (blocking, nonblocking, persistent)
+- Reduce-scatter-block: `reduce_scatter_block` (blocking, nonblocking, persistent)
+- All 13 nonblocking collective variants: `ibroadcast`, `iallreduce`, `ireduce`, `igather`, `iallgather`, `iscatter`, `ibarrier`, `iscan`, `iexscan`, `ialltoall`, `igatherv`, `iscatterv`, `iallgatherv`, `ialltoallv`, `ireduce_scatter_block`
+- All 11 persistent collective variants (MPI 4.0+): `bcast_init`, `allreduce_init`, `allreduce_init_inplace`, `reduce_init`, `gather_init`, `scatter_init`, `allgather_init`, `scan_init`, `exscan_init`, `alltoall_init`, `gatherv_init`, `scatterv_init`, `allgatherv_init`, `alltoallv_init`, `reduce_scatter_block_init`
+- Shared memory windows: `SharedWindow<T>` with RAII lock guards (`LockGuard`, `LockAllGuard`) (feature: `rma`)
+- Window synchronization: `fence`, `lock`, `lock_all`, `flush`, `flush_all`
+- SLURM environment helpers: `is_slurm_job`, `job_id`, `local_rank`, `local_size`, `num_nodes`, `cpus_per_task`, `node_name`, `node_list` (feature: `numa`)
+- Comprehensive test suite: unit tests for `slurm` module, MPI integration test runner (`tests/run_mpi_tests.sh`)
+- CI matrix: MPICH × OpenMPI × default/rma feature combinations
+- New examples: `comm_split`, `scan`, `gatherv`, `shared_memory`, `hybrid_openmp`
 
 ### Changed
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- C handle table limits expanded: 256 communicators, 16384 requests, 256 windows, 64 infos
+- Rich error messages via `MPI_Error_class` + `MPI_Error_string`
+- C wrapper layer significantly expanded (~2400 lines, up from ~700)
 
 ## [0.1.0] - 2026-01-13
 
 ### Added
+
 - Initial release
 - MPI 4.0+ support with persistent collectives
 - Safe Rust API for MPI operations
@@ -29,5 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Initial CI/CD setup with GitHub Actions
 
-[Unreleased]: https://github.com/rjmalves/ferrompi/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rjmalves/ferrompi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rjmalves/ferrompi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rjmalves/ferrompi/releases/tag/v0.1.0

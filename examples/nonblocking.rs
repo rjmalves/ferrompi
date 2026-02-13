@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     // Test 1: Nonblocking broadcast
     // ============================================================
     {
-        let mut data = if rank == 0 {
+        let mut data: Vec<f64> = if rank == 0 {
             vec![1.0, 2.0, 3.0, 4.0, 5.0]
         } else {
             vec![0.0; 5]
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
         // Start nonblocking broadcast
         let start_time = Mpi::wtime();
-        let request = world.ibroadcast_f64(&mut data, 0)?;
+        let request = world.ibroadcast(&mut data, 0)?;
 
         // Simulate some computation while communication proceeds
         let mut compute_result = 0.0;
@@ -68,7 +68,7 @@ fn main() -> Result<()> {
 
         // Start nonblocking all-reduce
         let start_time = Mpi::wtime();
-        let request = world.iallreduce_f64(&send, &mut recv, ReduceOp::Sum)?;
+        let request = world.iallreduce(&send, &mut recv, ReduceOp::Sum)?;
 
         // Do some work
         let mut work_done = 0;
@@ -106,25 +106,25 @@ fn main() -> Result<()> {
     // ============================================================
     {
         // Start multiple broadcasts
-        let mut data1 = if rank == 0 {
+        let mut data1: Vec<f64> = if rank == 0 {
             vec![1.0; 10]
         } else {
             vec![0.0; 10]
         };
-        let mut data2 = if rank == 0 {
+        let mut data2: Vec<f64> = if rank == 0 {
             vec![2.0; 10]
         } else {
             vec![0.0; 10]
         };
-        let mut data3 = if rank == 0 {
+        let mut data3: Vec<f64> = if rank == 0 {
             vec![3.0; 10]
         } else {
             vec![0.0; 10]
         };
 
-        let req1 = world.ibroadcast_f64(&mut data1, 0)?;
-        let req2 = world.ibroadcast_f64(&mut data2, 0)?;
-        let req3 = world.ibroadcast_f64(&mut data3, 0)?;
+        let req1 = world.ibroadcast(&mut data1, 0)?;
+        let req2 = world.ibroadcast(&mut data2, 0)?;
+        let req3 = world.ibroadcast(&mut data3, 0)?;
 
         // Wait for all at once
         Request::wait_all(vec![req1, req2, req3])?;
@@ -145,13 +145,13 @@ fn main() -> Result<()> {
     // Test 4: Using test() to poll for completion
     // ============================================================
     {
-        let mut data = if rank == 0 {
+        let mut data: Vec<f64> = if rank == 0 {
             vec![42.0; 100]
         } else {
             vec![0.0; 100]
         };
 
-        let mut request = world.ibroadcast_f64(&mut data, 0)?;
+        let mut request = world.ibroadcast(&mut data, 0)?;
 
         // Poll until complete
         let mut polls = 0;

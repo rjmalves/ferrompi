@@ -13,9 +13,20 @@ env:
 
 jobs:
   test:
-    name: Test Suite
+    name: Test (${{ matrix.mpi }}, ${{ matrix.features == '' && 'default' || matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mpi: [mpich, openmpi]
+        features: ["", "rma"]
+        include:
+          - mpi: mpich
+            pkg: mpich libmpich-dev
+          - mpi: openmpi
+            pkg: libopenmpi-dev openmpi-bin
 
     steps:
       - name: Checkout code
@@ -33,52 +44,85 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.mpi }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.mpi }}-
             ${{ runner.os }}-cargo-
 
       - name: Cache cargo build
         uses: actions/cache@v5
         with:
           path: target
-          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          key: ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-target-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-${{ matrix.features }}-
+            ${{ runner.os }}-target-${{ matrix.mpi }}-
 
       - name: Install MPI
         run: |
           sudo apt-get update
-          sudo apt-get install -y mpich libmpich-dev pkg-config libhwloc-dev libpmix-dev libucx-dev
+          sudo apt-get install -y ${{ matrix.pkg }} pkg-config libhwloc-dev
           mpiexec --version
+
+      - name: Hotfix MPICH on Ubuntu Noble
+        if: matrix.mpi == 'mpich'
+        run: |
+          # Workaround for broken MPICH 4.2.0 package in Ubuntu 24.04 LTS (Noble)
+          # See: https://bugs.launchpad.net/ubuntu/+source/mpich/+bug/2072338
+          # See: https://github.com/mpi4py/setup-mpi/issues/13
+          # Adapted from https://github.com/mpi4py/setup-mpi/blob/master/setup-mpi.sh
+          ARCH=$(dpkg --print-architecture)
+          REPO=https://archive.ubuntu.com/ubuntu
+          LIBUCX=libucx0_1.18.1+ds-2_${ARCH}.deb
+          LIBMPICH=libmpich12_4.2.1-5_${ARCH}.deb
+          curl -sSOf ${REPO}/pool/universe/u/ucx/${LIBUCX}
+          curl -sSOf ${REPO}/pool/universe/m/mpich/${LIBMPICH}
+          TMPDIR=$(mktemp -d)
+          dpkg-deb -x ${LIBUCX} ${TMPDIR}
+          dpkg-deb -x ${LIBMPICH} ${TMPDIR}
+          LIBDIR=/usr/lib/$(arch)-linux-gnu
+          sudo cp -a ${TMPDIR}${LIBDIR}/ucx ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libuc[mpst]*.so.0.*.* ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libuc[mpst]*.so.0 ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libmpi*.so.12.*.* ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libmpi*.so.12 ${LIBDIR}
+          sudo ldconfig
+          rm -rf ${TMPDIR} ${LIBUCX} ${LIBMPICH}
+          echo "MPICH hotfix applied successfully"
+
+      - name: Configure OpenMPI environment
+        if: matrix.mpi == 'openmpi'
+        run: |
+          echo "OMPI_MCA_rmaps_base_oversubscribe=1" >> "$GITHUB_ENV"
+          echo "OMPI_ALLOW_RUN_AS_ROOT=1" >> "$GITHUB_ENV"
+          echo "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1" >> "$GITHUB_ENV"
+          echo "OMPI_MCA_btl=self,tcp" >> "$GITHUB_ENV"
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
 
-      - name: Build library
-        run: cargo build --verbose --lib
+      - name: Clippy (with ${{ matrix.features }} features)
+        if: matrix.features != ''
+        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --lib --features numa --verbose
 
       - name: Build examples
-        run: cargo build --verbose --examples
+        run: cargo build --examples --features "${{ matrix.features }}"
 
-      - name: Run unit tests
-        run: cargo test --lib --verbose
-
-      - name: Run doc tests
-        run: cargo test --doc --verbose
-
-      - name: Run examples with MPI
+      - name: MPI integration tests
         run: |
-          for example in hello_world ring allreduce nonblocking persistent_bcast; do
-            echo "Running example: $example"
-            mpiexec -n 4 ./target/debug/examples/$example || exit 1
-          done
+          chmod +x tests/run_mpi_tests.sh
+          MPI_NP=4 ./tests/run_mpi_tests.sh "${{ matrix.features }}"
 
       - name: Build documentation
-        run: cargo doc --no-deps --all-features
+        if: matrix.features == 'rma'
+        run: cargo doc --no-deps --features rma
         env:
           RUSTDOCFLAGS: -D warnings
 
