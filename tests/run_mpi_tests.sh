@@ -160,8 +160,14 @@ echo -e "${BOLD}═════════════════════�
 run_test hello_world
 
 # Core test examples
+run_test test_lifecycle 2
 run_test test_collectives
+run_test test_blocking_extra
 run_test test_nonblocking
+run_test test_p2p_extra
+run_test test_nonblocking_collectives
+run_test test_persistent
+run_test test_info 2
 run_test test_comm_split 4
 
 echo ""
@@ -191,6 +197,7 @@ if [[ "$FEATURES" == *"rma"* ]] || [[ "$FEATURES" == *"numa"* ]]; then
     echo -e "${BOLD}────────────────────────────────────────${RESET}"
     echo -e "${BOLD}Running RMA/shared memory tests${RESET}"
     echo -e "${BOLD}────────────────────────────────────────${RESET}"
+    run_test test_rma_window
     run_test shared_memory
 fi
 
