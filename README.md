@@ -1,6 +1,6 @@
 # FerroMPI
 
-**Lightweight Rust bindings for MPI 4.x with persistent collectives support.**
+**Safe, generic Rust bindings for MPI 4.x with persistent collectives support.**
 
 [![Crates.io](https://img.shields.io/crates/v/ferrompi.svg)](https://crates.io/crates/ferrompi)
 [![Documentation](https://docs.rs/ferrompi/badge.svg)](https://docs.rs/ferrompi)
@@ -9,7 +9,7 @@
 [![codecov](https://codecov.io/gh/rjmalves/ferrompi/branch/main/graph/badge.svg)](https://codecov.io/gh/rjmalves/ferrompi)
 [![Security](https://github.com/rjmalves/ferrompi/actions/workflows/security.yml/badge.svg)](https://github.com/rjmalves/ferrompi/actions/workflows/security.yml)
 
-FerroMPI provides Rust bindings to MPI through a thin C wrapper layer, enabling access to MPI 4.0+ features like **persistent collectives** that are not available in other Rust MPI bindings.
+FerroMPI provides safe, generic Rust bindings to MPI through a thin C wrapper layer, enabling access to MPI 4.0+ features like **persistent collectives** that are not available in other Rust MPI bindings. All communication operations are generic over `MpiDatatype`, supporting `f32`, `f64`, `i32`, `i64`, `u8`, `u32`, and `u64`.
 
 ## Features
 
@@ -18,6 +18,7 @@ FerroMPI provides Rust bindings to MPI through a thin C wrapper layer, enabling 
 - 🔒 **Safe**: Rust-idiomatic API with proper error handling and RAII
 - 🔧 **Flexible**: Works with MPICH, OpenMPI, Intel MPI, and Cray MPI
 - ⚡ **Fast**: Zero-cost abstractions, direct FFI calls
+- 🧬 **Generic**: Type-safe API for all supported MPI datatypes
 
 ## Why FerroMPI?
 
@@ -26,6 +27,7 @@ FerroMPI provides Rust bindings to MPI through a thin C wrapper layer, enabling 
 | MPI Version            | 4.1              | 3.1                    |
 | Persistent Collectives | ✅               | ❌                     |
 | Large Count (>2³¹)     | ✅               | ❌                     |
+| Generic API            | ✅               | ✅                     |
 | API Style              | Minimal, focused | Comprehensive          |
 | C Wrapper              | ~700 lines       | None (direct bindings) |
 
@@ -35,6 +37,35 @@ FerroMPI is ideal for:
 - Applications with large data transfers (>2GB)
 - Users who want a simple, focused MPI API
 
+## Supported Types
+
+All communication operations are generic over `MpiDatatype`:
+
+| Rust Type | MPI Equivalent |
+| --------- | -------------- |
+| `f32`     | `MPI_FLOAT`    |
+| `f64`     | `MPI_DOUBLE`   |
+| `i32`     | `MPI_INT32_T`  |
+| `i64`     | `MPI_INT64_T`  |
+| `u8`      | `MPI_UINT8_T`  |
+| `u32`     | `MPI_UINT32_T` |
+| `u64`     | `MPI_UINT64_T` |
+
+## Feature Flags
+
+| Feature | Description                                        | Dependencies |
+| ------- | -------------------------------------------------- | ------------ |
+| `rma`   | RMA shared memory window operations                | —            |
+| `numa`  | NUMA-aware shared memory windows and SLURM helpers | `rma`        |
+| `debug` | Detailed debug output from the C layer             | —            |
+
+Enable features in your `Cargo.toml`:
+
+```toml
+[dependencies]
+ferrompi = { version = "0.2", features = ["rma"] }
+```
+
 ## Quick Start
 
 ### Installation
@@ -43,7 +74,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ferrompi = "0.1"
+ferrompi = "0.2"
 ```
 
 ### Requirements
@@ -77,7 +108,7 @@ fn main() -> ferrompi::Result<()> {
 
     println!("Hello from rank {} of {}", rank, size);
 
-    // Sum across all ranks
+    // Generic all-reduce — works with any MpiDatatype
     let sum = world.allreduce_scalar(rank as f64, ReduceOp::Sum)?;
     println!("Rank {}: sum = {}", rank, sum);
 
@@ -100,22 +131,26 @@ use ferrompi::{Mpi, ReduceOp};
 let mpi = Mpi::init()?;
 let world = mpi.world();
 
-// Broadcast
-let mut data = vec![0.0; 100];
+// Broadcast (generic — works with f64, i32, u8, etc.)
+let mut data = vec![0.0f64; 100];
 if world.rank() == 0 {
     data.fill(42.0);
 }
-world.broadcast_f64(&mut data, 0)?;
+world.broadcast(&mut data, 0)?;
 
 // All-reduce
-let send = vec![1.0; 100];
-let mut recv = vec![0.0; 100];
-world.allreduce_f64(&send, &mut recv, ReduceOp::Sum)?;
+let send = vec![1.0f64; 100];
+let mut recv = vec![0.0f64; 100];
+world.allreduce(&send, &mut recv, ReduceOp::Sum)?;
 
 // Gather
 let my_data = vec![world.rank() as f64];
-let mut gathered = vec![0.0; world.size() as usize];
-world.gather_f64(&my_data, &mut gathered, 0)?;
+let mut gathered = vec![0.0f64; world.size() as usize];
+world.gather(&my_data, &mut gathered, 0)?;
+
+// Works with integers too!
+let mut int_data = vec![0i32; 100];
+world.broadcast(&mut int_data, 0)?;
 ```
 
 ### Nonblocking Collectives
@@ -126,11 +161,11 @@ use ferrompi::{Mpi, ReduceOp, Request};
 let mpi = Mpi::init()?;
 let world = mpi.world();
 
-let send = vec![1.0; 1000];
-let mut recv = vec![0.0; 1000];
+let send = vec![1.0f64; 1000];
+let mut recv = vec![0.0f64; 1000];
 
 // Start nonblocking operation
-let request = world.iallreduce_f64(&send, &mut recv, ReduceOp::Sum)?;
+let request = world.iallreduce(&send, &mut recv, ReduceOp::Sum)?;
 
 // Do other work while communication proceeds...
 expensive_computation();
@@ -152,9 +187,9 @@ let world = mpi.world();
 let mut data = vec![0.0f64; 1000];
 
 // Initialize ONCE
-let mut persistent = world.bcast_init_f64(&mut data, 0)?;
+let mut persistent = world.bcast_init(&mut data, 0)?;
 
-// Use MANY times - amortizes setup cost!
+// Use MANY times — amortizes setup cost!
 for iter in 0..10000 {
     if world.rank() == 0 {
         data.fill(iter as f64);
@@ -168,6 +203,24 @@ for iter in 0..10000 {
 // Cleanup on drop
 ```
 
+### Point-to-Point Communication
+
+```rust
+use ferrompi::Mpi;
+
+let mpi = Mpi::init()?;
+let world = mpi.world();
+
+if world.rank() == 0 {
+    let data = vec![1.0f64, 2.0, 3.0];
+    world.send(&data, 1, 0)?;
+} else if world.rank() == 1 {
+    let mut buf = vec![0.0f64; 3];
+    let (source, tag, count) = world.recv(&mut buf, 0, 0)?;
+    println!("Received {:?} from rank {}", buf, source);
+}
+```
+
 ## API Reference
 
 ### Core Types
@@ -178,17 +231,18 @@ for iter in 0..10000 {
 | `Communicator`      | MPI communicator wrapper               |
 | `Request`           | Nonblocking operation handle           |
 | `PersistentRequest` | Persistent operation handle (MPI 4.0+) |
+| `MpiDatatype`       | Trait for types usable in MPI ops      |
 
 ### Collective Operations
 
-| Operation | Blocking        | Nonblocking      | Persistent           |
-| --------- | --------------- | ---------------- | -------------------- |
-| Broadcast | `broadcast_f64` | `ibroadcast_f64` | `bcast_init_f64`     |
-| Reduce    | `reduce_f64`    | -                | -                    |
-| Allreduce | `allreduce_f64` | `iallreduce_f64` | `allreduce_init_f64` |
-| Gather    | `gather_f64`    | -                | -                    |
-| Allgather | `allgather_f64` | -                | -                    |
-| Scatter   | `scatter_f64`   | -                | -                    |
+| Operation | Blocking    | Nonblocking  | Persistent       |
+| --------- | ----------- | ------------ | ---------------- |
+| Broadcast | `broadcast` | `ibroadcast` | `bcast_init`     |
+| Reduce    | `reduce`    | —            | —                |
+| Allreduce | `allreduce` | `iallreduce` | `allreduce_init` |
+| Gather    | `gather`    | —            | `gather_init`    |
+| Allgather | `allgather` | —            | —                |
+| Scatter   | `scatter`   | —            | —                |
 
 ### Reduction Operations
 
@@ -211,6 +265,7 @@ cargo build --release --examples
 mpiexec -n 4 ./target/release/examples/hello_world
 
 # Run all examples
+mpiexec -n 4 ./target/release/examples/ring
 mpiexec -n 4 ./target/release/examples/allreduce
 mpiexec -n 4 ./target/release/examples/nonblocking
 mpiexec -n 4 ./target/release/examples/persistent_bcast

@@ -21,7 +21,7 @@ use crate::ffi;
 /// let mut recv = vec![0.0; 10];
 ///
 /// // Start nonblocking all-reduce
-/// let request = world.iallreduce_f64(&send, &mut recv, ReduceOp::Sum).unwrap();
+/// let request = world.iallreduce(&send, &mut recv, ReduceOp::Sum).unwrap();
 ///
 /// // Do other work while communication proceeds...
 ///

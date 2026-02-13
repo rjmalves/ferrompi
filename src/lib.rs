@@ -1,10 +1,19 @@
 //! # ferrompi
 //!
-//! Thin MPI 4.x bindings for the powers-rs SDDP implementation.
+//! Safe, generic Rust bindings for MPI (Message Passing Interface).
 //!
-//! This crate provides access to MPI functionality through a C wrapper layer,
-//! enabling use of MPI 4.0+ features like persistent collectives that are not
-//! available in the `rsmpi` crate.
+//! This crate wraps MPI functionality through a thin C layer, providing:
+//! - Type-safe generic API for all MPI datatypes
+//! - Blocking, nonblocking, and persistent (MPI 4.0+) collectives
+//! - Communicator management (split, duplicate)
+//! - RMA shared memory windows (with `rma` feature)
+//! - SLURM environment helpers (with `numa` feature)
+//! - Large count support (MPI 4.0+ `_c` variants)
+//!
+//! ## Supported Types
+//!
+//! All communication operations are generic over [`MpiDatatype`]:
+//! `f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`
 //!
 //! ## Quick Start
 //!
@@ -12,34 +21,43 @@
 //! use ferrompi::{Mpi, ReduceOp};
 //!
 //! fn main() -> Result<(), ferrompi::Error> {
-//!     // Initialize MPI
 //!     let mpi = Mpi::init()?;
 //!     let world = mpi.world();
 //!
 //!     let rank = world.rank();
 //!     let size = world.size();
-//!
 //!     println!("Hello from rank {} of {}", rank, size);
 //!
-//!     // Synchronize
-//!     world.barrier()?;
+//!     // Generic broadcast — works with any MpiDatatype
+//!     let mut data = vec![0.0f64; 100];
+//!     if rank == 0 {
+//!         data.fill(42.0);
+//!     }
+//!     world.broadcast(&mut data, 0)?;
 //!
-//!     // All-reduce example
-//!     let my_value = rank as f64;
-//!     let sum = world.allreduce_scalar(my_value, ReduceOp::Sum)?;
-//!     println!("Rank {}: sum of all ranks = {}", rank, sum);
+//!     // Generic all-reduce
+//!     let sum = world.allreduce_scalar(rank as f64, ReduceOp::Sum)?;
+//!     println!("Rank {rank}: sum of all ranks = {sum}");
 //!
 //!     Ok(())
-//!     // MPI finalized on drop
 //! }
 //! ```
 //!
-//! ## Features
+//! ## Feature Flags
 //!
+//! | Feature | Description | Dependencies |
+//! |---------|-------------|--------------|
+//! | `rma`   | RMA shared memory window operations | — |
+//! | `numa`  | NUMA-aware windows and SLURM helpers | `rma` |
+//! | `debug` | Detailed debug output | — |
+//!
+//! ## Capabilities
+//!
+//! - **Generic API**: All operations work with any [`MpiDatatype`] (`f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`)
 //! - **Basic collectives**: barrier, broadcast, reduce, allreduce, gather, scatter
 //! - **Nonblocking collectives**: ibcast, iallreduce with request handles
 //! - **Persistent collectives** (MPI 4.0+): `bcast_init`, `allreduce_init`, etc.
-//! - **Large count support** (MPI 4.0+): automatic use of `_c` variants for large arrays
+//! - **Rich error handling**: [`MpiErrorClass`] categorization with messages from the MPI runtime
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
@@ -55,13 +73,15 @@
 #![allow(clippy::similar_names)]
 
 mod comm;
+mod datatype;
 mod error;
 mod ffi;
 mod persistent;
 mod request;
 
 pub use comm::Communicator;
-pub use error::{Error, Result};
+pub use datatype::{DatatypeTag, MpiDatatype};
+pub use error::{Error, MpiErrorClass, Result};
 pub use persistent::PersistentRequest;
 pub use request::Request;
 

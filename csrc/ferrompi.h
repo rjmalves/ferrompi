@@ -23,6 +23,21 @@ extern "C" {
 #endif
 
 /* ============================================================
+ * Datatype Tags
+ * ============================================================
+ * These tags map to MPI_Datatype values in the C layer.
+ * They must match the Rust DatatypeTag enum discriminants.
+ */
+
+#define FERROMPI_F32  0
+#define FERROMPI_F64  1
+#define FERROMPI_I32  2
+#define FERROMPI_I64  3
+#define FERROMPI_U8   4
+#define FERROMPI_U32  5
+#define FERROMPI_U64  6
+
+/* ============================================================
  * Initialization and Finalization
  * ============================================================ */
 
@@ -113,30 +128,33 @@ int ferrompi_comm_free(int32_t comm);
 int ferrompi_barrier(int32_t comm);
 
 /* ============================================================
- * Point-to-Point Communication
+ * Generic Point-to-Point Communication
  * ============================================================ */
 
 /**
- * Blocking send (f64 array)
+ * Blocking send (generic)
  * @param buf Data buffer
  * @param count Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
  * @param dest Destination rank
  * @param tag Message tag
  * @param comm Communicator handle
  * @return MPI error code
  */
-int ferrompi_send_f64(
-    const double* buf,
+int ferrompi_send(
+    const void* buf,
     int64_t count,
+    int32_t datatype_tag,
     int32_t dest,
     int32_t tag,
     int32_t comm
 );
 
 /**
- * Blocking receive (f64 array)
+ * Blocking receive (generic)
  * @param buf Receive buffer
  * @param count Maximum number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
  * @param source Source rank (or -1 for MPI_ANY_SOURCE)
  * @param tag Message tag (or -1 for MPI_ANY_TAG)
  * @param comm Communicator handle
@@ -145,9 +163,10 @@ int ferrompi_send_f64(
  * @param actual_count Output: actual count received
  * @return MPI error code
  */
-int ferrompi_recv_f64(
-    double* buf,
+int ferrompi_recv(
+    void* buf,
     int64_t count,
+    int32_t datatype_tag,
     int32_t source,
     int32_t tag,
     int32_t comm,
@@ -157,174 +176,69 @@ int ferrompi_recv_f64(
 );
 
 /* ============================================================
- * Collective Operations - Blocking
+ * Generic Collective Operations - Blocking
  * ============================================================ */
 
-/**
- * Broadcast (f64 array)
- * @param buf Data buffer (significant at root)
- * @param count Number of elements
- * @param root Root rank
- * @param comm Communicator handle
- * @return MPI error code
- */
-int ferrompi_bcast_f64(
-    double* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm
-);
+/** Broadcast (generic) */
+int ferrompi_bcast(void* buf, int64_t count, int32_t datatype_tag, int32_t root, int32_t comm);
 
-/**
- * Broadcast (i32 array)
- */
-int ferrompi_bcast_i32(
-    int32_t* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm
-);
+/** Reduce (generic) */
+int ferrompi_reduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t root, int32_t comm);
 
-/**
- * Broadcast (i64 array)
- */
-int ferrompi_bcast_i64(
-    int64_t* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm
-);
+/** All-reduce (generic) */
+int ferrompi_allreduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
 
-/**
- * Broadcast (raw bytes)
- */
-int ferrompi_bcast_bytes(
-    void* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm
-);
+/** In-place all-reduce (generic) */
+int ferrompi_allreduce_inplace(void* buf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
 
-/**
- * Reduce operation (f64)
- * @param sendbuf Send buffer
- * @param recvbuf Receive buffer (significant at root)
- * @param count Number of elements
- * @param op Operation (0=SUM, 1=MAX, 2=MIN, 3=PROD)
- * @param root Root rank
- * @param comm Communicator handle
- * @return MPI error code
- */
-int ferrompi_reduce_f64(
-    const double* sendbuf,
-    double* recvbuf,
-    int64_t count,
-    int32_t op,
-    int32_t root,
-    int32_t comm
-);
+/** Gather (generic) */
+int ferrompi_gather(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm);
 
-/**
- * All-reduce operation (f64)
- * @param sendbuf Send buffer
- * @param recvbuf Receive buffer
- * @param count Number of elements
- * @param op Operation (0=SUM, 1=MAX, 2=MIN, 3=PROD)
- * @param comm Communicator handle
- * @return MPI error code
- */
-int ferrompi_allreduce_f64(
-    const double* sendbuf,
-    double* recvbuf,
-    int64_t count,
-    int32_t op,
-    int32_t comm
-);
+/** All-gather (generic) */
+int ferrompi_allgather(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm);
 
-/**
- * In-place all-reduce operation (f64)
- */
-int ferrompi_allreduce_inplace_f64(
-    double* buf,
-    int64_t count,
-    int32_t op,
-    int32_t comm
-);
-
-/**
- * Gather (f64)
- * @param sendbuf Send buffer
- * @param sendcount Elements to send
- * @param recvbuf Receive buffer (significant at root)
- * @param recvcount Elements to receive from each process
- * @param root Root rank
- * @param comm Communicator handle
- * @return MPI error code
- */
-int ferrompi_gather_f64(
-    const double* sendbuf,
-    int64_t sendcount,
-    double* recvbuf,
-    int64_t recvcount,
-    int32_t root,
-    int32_t comm
-);
-
-/**
- * All-gather (f64)
- */
-int ferrompi_allgather_f64(
-    const double* sendbuf,
-    int64_t sendcount,
-    double* recvbuf,
-    int64_t recvcount,
-    int32_t comm
-);
-
-/**
- * Scatter (f64)
- */
-int ferrompi_scatter_f64(
-    const double* sendbuf,
-    int64_t sendcount,
-    double* recvbuf,
-    int64_t recvcount,
-    int32_t root,
-    int32_t comm
-);
+/** Scatter (generic) */
+int ferrompi_scatter(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm);
 
 /* ============================================================
- * Collective Operations - Nonblocking
+ * Generic Collective Operations - Nonblocking
+ * ============================================================ */
+
+/** Nonblocking broadcast (generic) */
+int ferrompi_ibcast(void* buf, int64_t count, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking all-reduce (generic) */
+int ferrompi_iallreduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/* ============================================================
+ * Generic Persistent Collectives (MPI 4.0+)
+ * ============================================================ */
+
+/** Initialize persistent broadcast (generic) */
+int ferrompi_bcast_init(void* buf, int64_t count, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-reduce (generic) */
+int ferrompi_allreduce_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-reduce in-place (generic) */
+int ferrompi_allreduce_init_inplace(void* buf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Initialize persistent gather (generic) */
+int ferrompi_gather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/* ============================================================
+ * Error Information
  * ============================================================ */
 
 /**
- * Nonblocking broadcast (f64)
- * @param buf Data buffer
- * @param count Number of elements
- * @param root Root rank
- * @param comm Communicator handle
- * @param request Output: request handle
+ * Get error class and message string for an MPI error code
+ * @param code MPI error code
+ * @param error_class Output: error class
+ * @param message Output: error message (at least MPI_MAX_ERROR_STRING bytes)
+ * @param msg_len Output: actual message length
  * @return MPI error code
  */
-int ferrompi_ibcast_f64(
-    double* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm,
-    int64_t* request
-);
-
-/**
- * Nonblocking all-reduce (f64)
- */
-int ferrompi_iallreduce_f64(
-    const double* sendbuf,
-    double* recvbuf,
-    int64_t count,
-    int32_t op,
-    int32_t comm,
-    int64_t* request
-);
+int ferrompi_error_info(int code, int32_t* error_class, char* message, int32_t* msg_len);
 
 /* ============================================================
  * Request Management
@@ -360,63 +274,6 @@ int ferrompi_waitall(int64_t count, int64_t* requests);
  */
 int ferrompi_request_free(int64_t request);
 
-/* ============================================================
- * Persistent Collectives (MPI 4.0+)
- * ============================================================ */
-
-/**
- * Initialize persistent broadcast (f64)
- * @param buf Data buffer
- * @param count Number of elements
- * @param root Root rank
- * @param comm Communicator handle
- * @param request Output: persistent request handle
- * @return MPI error code
- */
-int ferrompi_bcast_init_f64(
-    double* buf,
-    int64_t count,
-    int32_t root,
-    int32_t comm,
-    int64_t* request
-);
-
-/**
- * Initialize persistent all-reduce (f64)
- */
-int ferrompi_allreduce_init_f64(
-    const double* sendbuf,
-    double* recvbuf,
-    int64_t count,
-    int32_t op,
-    int32_t comm,
-    int64_t* request
-);
-
-/**
- * Initialize persistent all-reduce in-place (f64)
- */
-int ferrompi_allreduce_init_inplace_f64(
-    double* buf,
-    int64_t count,
-    int32_t op,
-    int32_t comm,
-    int64_t* request
-);
-
-/**
- * Initialize persistent gather (f64)
- */
-int ferrompi_gather_init_f64(
-    const double* sendbuf,
-    int64_t sendcount,
-    double* recvbuf,
-    int64_t recvcount,
-    int32_t root,
-    int32_t comm,
-    int64_t* request
-);
-
 /**
  * Start a persistent request
  * @param request Persistent request handle
@@ -431,6 +288,19 @@ int ferrompi_start(int64_t request);
  * @return MPI error code
  */
 int ferrompi_startall(int64_t count, int64_t* requests);
+
+/* ============================================================
+ * RMA Window Operations (to be implemented in tickets 015-018)
+ * ============================================================
+ *
+ * Window handle table supports up to 256 concurrent MPI_Win objects.
+ * Functions will be added for:
+ * - MPI_Win_allocate_shared
+ * - MPI_Win_shared_query
+ * - MPI_Win_fence / MPI_Win_lock / MPI_Win_lock_all
+ * - MPI_Win_unlock / MPI_Win_unlock_all
+ * - MPI_Win_free
+ */
 
 /* ============================================================
  * Utility Functions

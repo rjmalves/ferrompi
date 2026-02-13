@@ -1,68 +1,220 @@
-//! Error types for ferrompi
+//! Error types for ferrompi.
+//!
+//! This module provides structured MPI error handling with error class
+//! categorization and human-readable messages obtained from the MPI runtime.
 
+use crate::ffi;
 use thiserror::Error;
 
-/// Result type for MPI operations
+/// Result type for MPI operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Error types for MPI operations
+/// MPI error class, categorizing the type of MPI error.
+///
+/// These correspond to the standard MPI error classes defined by the MPI specification.
+/// The C layer calls `MPI_Error_class` to map an error code to one of these classes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MpiErrorClass {
+    /// `MPI_SUCCESS` — no error
+    Success,
+    /// `MPI_ERR_BUFFER` — invalid buffer pointer
+    Buffer,
+    /// `MPI_ERR_COUNT` — invalid count argument
+    Count,
+    /// `MPI_ERR_TYPE` — invalid datatype argument
+    Type,
+    /// `MPI_ERR_TAG` — invalid tag argument
+    Tag,
+    /// `MPI_ERR_COMM` — invalid communicator
+    Comm,
+    /// `MPI_ERR_RANK` — invalid rank
+    Rank,
+    /// `MPI_ERR_REQUEST` — invalid request handle
+    Request,
+    /// `MPI_ERR_ROOT` — invalid root
+    Root,
+    /// `MPI_ERR_GROUP` — invalid group
+    Group,
+    /// `MPI_ERR_OP` — invalid operation
+    Op,
+    /// `MPI_ERR_TOPOLOGY` — invalid topology
+    Topology,
+    /// `MPI_ERR_DIMS` — invalid dimension argument
+    Dims,
+    /// `MPI_ERR_ARG` — invalid argument
+    Arg,
+    /// `MPI_ERR_UNKNOWN` — unknown error
+    Unknown,
+    /// `MPI_ERR_TRUNCATE` — message truncated
+    Truncate,
+    /// `MPI_ERR_OTHER` — other error
+    Other,
+    /// `MPI_ERR_INTERN` — internal MPI error
+    Intern,
+    /// `MPI_ERR_IN_STATUS` — error code is in status
+    InStatus,
+    /// `MPI_ERR_PENDING` — pending request
+    Pending,
+    /// `MPI_ERR_WIN` — invalid window
+    Win,
+    /// `MPI_ERR_INFO` — invalid info object
+    Info,
+    /// `MPI_ERR_FILE` — invalid file handle
+    File,
+    /// Unrecognized error class from the MPI implementation
+    Raw(i32),
+}
+
+impl MpiErrorClass {
+    /// Map a raw MPI error class integer to the enum variant.
+    ///
+    /// Standard MPI error class values (MPI-3.1 Table 9.4):
+    /// 0=SUCCESS, 1=BUFFER, 2=COUNT, 3=TYPE, 4=TAG, 5=COMM,
+    /// 6=RANK, 7=REQUEST, 8=ROOT, 9=GROUP, 10=OP, 11=TOPOLOGY,
+    /// 12=DIMS, 13=ARG, 14=UNKNOWN, 15=TRUNCATE, 16=OTHER,
+    /// 17=INTERN, 18=IN_STATUS, 19=PENDING, plus implementation-
+    /// specific classes for WIN (45), INFO (28), FILE (27).
+    pub fn from_raw(class: i32) -> Self {
+        match class {
+            0 => MpiErrorClass::Success,
+            1 => MpiErrorClass::Buffer,
+            2 => MpiErrorClass::Count,
+            3 => MpiErrorClass::Type,
+            4 => MpiErrorClass::Tag,
+            5 => MpiErrorClass::Comm,
+            6 => MpiErrorClass::Rank,
+            7 => MpiErrorClass::Request,
+            8 => MpiErrorClass::Root,
+            9 => MpiErrorClass::Group,
+            10 => MpiErrorClass::Op,
+            11 => MpiErrorClass::Topology,
+            12 => MpiErrorClass::Dims,
+            13 => MpiErrorClass::Arg,
+            14 => MpiErrorClass::Unknown,
+            15 => MpiErrorClass::Truncate,
+            16 => MpiErrorClass::Other,
+            17 => MpiErrorClass::Intern,
+            18 => MpiErrorClass::InStatus,
+            19 => MpiErrorClass::Pending,
+            // Implementation-specific classes (MPICH/Open MPI values)
+            27 => MpiErrorClass::File,
+            28 => MpiErrorClass::Info,
+            45 => MpiErrorClass::Win,
+            other => MpiErrorClass::Raw(other),
+        }
+    }
+}
+
+impl std::fmt::Display for MpiErrorClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MpiErrorClass::Success => write!(f, "SUCCESS"),
+            MpiErrorClass::Buffer => write!(f, "ERR_BUFFER"),
+            MpiErrorClass::Count => write!(f, "ERR_COUNT"),
+            MpiErrorClass::Type => write!(f, "ERR_TYPE"),
+            MpiErrorClass::Tag => write!(f, "ERR_TAG"),
+            MpiErrorClass::Comm => write!(f, "ERR_COMM"),
+            MpiErrorClass::Rank => write!(f, "ERR_RANK"),
+            MpiErrorClass::Request => write!(f, "ERR_REQUEST"),
+            MpiErrorClass::Root => write!(f, "ERR_ROOT"),
+            MpiErrorClass::Group => write!(f, "ERR_GROUP"),
+            MpiErrorClass::Op => write!(f, "ERR_OP"),
+            MpiErrorClass::Topology => write!(f, "ERR_TOPOLOGY"),
+            MpiErrorClass::Dims => write!(f, "ERR_DIMS"),
+            MpiErrorClass::Arg => write!(f, "ERR_ARG"),
+            MpiErrorClass::Unknown => write!(f, "ERR_UNKNOWN"),
+            MpiErrorClass::Truncate => write!(f, "ERR_TRUNCATE"),
+            MpiErrorClass::Other => write!(f, "ERR_OTHER"),
+            MpiErrorClass::Intern => write!(f, "ERR_INTERN"),
+            MpiErrorClass::InStatus => write!(f, "ERR_IN_STATUS"),
+            MpiErrorClass::Pending => write!(f, "ERR_PENDING"),
+            MpiErrorClass::Win => write!(f, "ERR_WIN"),
+            MpiErrorClass::Info => write!(f, "ERR_INFO"),
+            MpiErrorClass::File => write!(f, "ERR_FILE"),
+            MpiErrorClass::Raw(c) => write!(f, "ERR_CLASS({c})"),
+        }
+    }
+}
+
+/// Error types for MPI operations.
 #[derive(Error, Debug)]
 pub enum Error {
-    /// MPI has already been initialized
+    /// MPI has already been initialized.
     #[error("MPI has already been initialized")]
     AlreadyInitialized,
 
-    /// MPI has not been initialized
-    #[error("MPI has not been initialized")]
-    NotInitialized,
+    /// MPI error with class, code, and descriptive message from the MPI runtime.
+    #[error("MPI error: {message} (class={class}, code={code})")]
+    Mpi {
+        /// The error class (category of error).
+        class: MpiErrorClass,
+        /// The raw MPI error code.
+        code: i32,
+        /// Human-readable error message from `MPI_Error_string`.
+        message: String,
+    },
 
-    /// Invalid rank specified
-    #[error("Invalid rank: {0}")]
-    InvalidRank(i32),
-
-    /// Invalid communicator handle
-    #[error("Invalid communicator")]
-    InvalidCommunicator,
-
-    /// Invalid request handle
-    #[error("Invalid request handle")]
-    InvalidRequest,
-
-    /// Invalid buffer provided
+    /// Invalid buffer provided (e.g., send/recv buffer size mismatch).
     #[error("Invalid buffer")]
     InvalidBuffer,
 
-    /// Invalid count specified
-    #[error("Invalid count: {0}")]
-    InvalidCount(i64),
-
-    /// Operation not supported (e.g., MPI 4.0 features on older MPI)
+    /// Operation not supported (e.g., MPI 4.0 persistent collectives on older MPI).
     #[error("Operation not supported: {0}")]
     NotSupported(String),
 
-    /// MPI error with code
-    #[error("MPI error (code {0})")]
-    MpiError(i32),
-
-    /// Internal error
+    /// Internal ferrompi error.
     #[error("Internal error: {0}")]
     Internal(String),
 }
 
 impl Error {
-    /// Create an error from an MPI error code.
+    /// Create a structured error from an MPI error code.
     ///
-    /// Returns `Ok(())` for `MPI_SUCCESS` (0), otherwise returns an error.
+    /// Calls `ferrompi_error_info` to obtain the error class and human-readable
+    /// message from the MPI runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called with `MPI_SUCCESS` (code 0).
     pub fn from_code(code: i32) -> Self {
-        match code {
-            0 => panic!("from_code called with success code"),
-            // Common MPI error codes (these values are implementation-specific,
-            // but we provide some common mappings)
-            _ => Error::MpiError(code),
+        assert!(code != 0, "from_code called with success code 0");
+
+        let mut class: i32 = 0;
+        let mut msg_buf = [0u8; 512];
+        let mut msg_len: i32 = 0;
+
+        let ret = unsafe {
+            ffi::ferrompi_error_info(
+                code,
+                &mut class,
+                msg_buf.as_mut_ptr().cast::<i8>(),
+                &mut msg_len,
+            )
+        };
+
+        if ret == 0 {
+            let len = msg_len.max(0) as usize;
+            let message = std::str::from_utf8(&msg_buf[..len])
+                .unwrap_or("unknown error")
+                .to_string();
+            Error::Mpi {
+                class: MpiErrorClass::from_raw(class),
+                code,
+                message,
+            }
+        } else {
+            // ferrompi_error_info itself failed — provide a fallback
+            Error::Mpi {
+                class: MpiErrorClass::Raw(code),
+                code,
+                message: format!("MPI error code {code}"),
+            }
         }
     }
 
-    /// Check an MPI return code, returning Ok(()) for success.
+    /// Check an MPI return code, returning `Ok(())` for success.
+    ///
+    /// Returns `Err(Error::Mpi { .. })` for non-zero codes.
     pub fn check(code: i32) -> Result<()> {
         if code == 0 {
             Ok(())

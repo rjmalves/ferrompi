@@ -39,20 +39,22 @@ extern "C" {
     pub fn ferrompi_barrier(comm: int32_t) -> c_int;
 
     // ============================================================
-    // Point-to-Point Communication
+    // Generic Point-to-Point Communication
     // ============================================================
 
-    pub fn ferrompi_send_f64(
-        buf: *const c_double,
+    pub fn ferrompi_send(
+        buf: *const c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         dest: int32_t,
         tag: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_recv_f64(
-        buf: *mut c_double,
+    pub fn ferrompi_recv(
+        buf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         source: int32_t,
         tag: int32_t,
         comm: int32_t,
@@ -62,106 +64,148 @@ extern "C" {
     ) -> c_int;
 
     // ============================================================
-    // Collective Operations - Blocking
+    // Generic Collective Operations - Blocking
     // ============================================================
 
-    pub fn ferrompi_bcast_f64(
-        buf: *mut c_double,
-        count: int64_t,
-        root: int32_t,
-        comm: int32_t,
-    ) -> c_int;
-
-    pub fn ferrompi_bcast_i32(
-        buf: *mut int32_t,
-        count: int64_t,
-        root: int32_t,
-        comm: int32_t,
-    ) -> c_int;
-
-    pub fn ferrompi_bcast_i64(
-        buf: *mut int64_t,
-        count: int64_t,
-        root: int32_t,
-        comm: int32_t,
-    ) -> c_int;
-
-    pub fn ferrompi_bcast_bytes(
+    pub fn ferrompi_bcast(
         buf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         root: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_reduce_f64(
-        sendbuf: *const c_double,
-        recvbuf: *mut c_double,
+    pub fn ferrompi_reduce(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         op: int32_t,
         root: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_allreduce_f64(
-        sendbuf: *const c_double,
-        recvbuf: *mut c_double,
+    pub fn ferrompi_allreduce(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         op: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_allreduce_inplace_f64(
-        buf: *mut c_double,
+    pub fn ferrompi_allreduce_inplace(
+        buf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         op: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_gather_f64(
-        sendbuf: *const c_double,
+    pub fn ferrompi_gather(
+        sendbuf: *const c_void,
         sendcount: int64_t,
-        recvbuf: *mut c_double,
+        recvbuf: *mut c_void,
         recvcount: int64_t,
+        datatype_tag: int32_t,
         root: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_allgather_f64(
-        sendbuf: *const c_double,
+    pub fn ferrompi_allgather(
+        sendbuf: *const c_void,
         sendcount: int64_t,
-        recvbuf: *mut c_double,
+        recvbuf: *mut c_void,
         recvcount: int64_t,
+        datatype_tag: int32_t,
         comm: int32_t,
     ) -> c_int;
 
-    pub fn ferrompi_scatter_f64(
-        sendbuf: *const c_double,
+    pub fn ferrompi_scatter(
+        sendbuf: *const c_void,
         sendcount: int64_t,
-        recvbuf: *mut c_double,
+        recvbuf: *mut c_void,
         recvcount: int64_t,
+        datatype_tag: int32_t,
         root: int32_t,
         comm: int32_t,
     ) -> c_int;
 
     // ============================================================
-    // Collective Operations - Nonblocking
+    // Generic Collective Operations - Nonblocking
     // ============================================================
 
-    pub fn ferrompi_ibcast_f64(
-        buf: *mut c_double,
+    pub fn ferrompi_ibcast(
+        buf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         root: int32_t,
         comm: int32_t,
         request: *mut int64_t,
     ) -> c_int;
 
-    pub fn ferrompi_iallreduce_f64(
-        sendbuf: *const c_double,
-        recvbuf: *mut c_double,
+    pub fn ferrompi_iallreduce(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
         count: int64_t,
+        datatype_tag: int32_t,
         op: int32_t,
         comm: int32_t,
         request: *mut int64_t,
+    ) -> c_int;
+
+    // ============================================================
+    // Generic Persistent Collectives (MPI 4.0+)
+    // ============================================================
+
+    pub fn ferrompi_bcast_init(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_allreduce_init(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_allreduce_init_inplace(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_gather_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    // ============================================================
+    // Error Information
+    // ============================================================
+
+    pub fn ferrompi_error_info(
+        code: c_int,
+        error_class: *mut int32_t,
+        message: *mut c_char,
+        msg_len: *mut int32_t,
     ) -> c_int;
 
     // ============================================================
@@ -174,43 +218,8 @@ extern "C" {
     pub fn ferrompi_request_free(request: int64_t) -> c_int;
 
     // ============================================================
-    // Persistent Collectives (MPI 4.0+)
+    // Persistent Request Management
     // ============================================================
-
-    pub fn ferrompi_bcast_init_f64(
-        buf: *mut c_double,
-        count: int64_t,
-        root: int32_t,
-        comm: int32_t,
-        request: *mut int64_t,
-    ) -> c_int;
-
-    pub fn ferrompi_allreduce_init_f64(
-        sendbuf: *const c_double,
-        recvbuf: *mut c_double,
-        count: int64_t,
-        op: int32_t,
-        comm: int32_t,
-        request: *mut int64_t,
-    ) -> c_int;
-
-    pub fn ferrompi_allreduce_init_inplace_f64(
-        buf: *mut c_double,
-        count: int64_t,
-        op: int32_t,
-        comm: int32_t,
-        request: *mut int64_t,
-    ) -> c_int;
-
-    pub fn ferrompi_gather_init_f64(
-        sendbuf: *const c_double,
-        sendcount: int64_t,
-        recvbuf: *mut c_double,
-        recvcount: int64_t,
-        root: int32_t,
-        comm: int32_t,
-        request: *mut int64_t,
-    ) -> c_int;
 
     pub fn ferrompi_start(request: int64_t) -> c_int;
     pub fn ferrompi_startall(count: int64_t, requests: *mut int64_t) -> c_int;
@@ -223,4 +232,5 @@ extern "C" {
     pub fn ferrompi_get_processor_name(name: *mut c_char, len: *mut int32_t) -> c_int;
     pub fn ferrompi_wtime() -> c_double;
     pub fn ferrompi_abort(comm: int32_t, errorcode: int32_t) -> c_int;
+
 }

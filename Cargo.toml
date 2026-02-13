@@ -1,10 +1,10 @@
 [package]
 name = "ferrompi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Rogerio Alves"]
-description = "A thin wrapper for Rust to access the C API of MPICH / OpenMP"
+description = "A safe, generic Rust wrapper for MPI with support for MPI 4.0+ features, shared memory windows, and hybrid MPI+OpenMP"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rjmalves/ferrompi"
 keywords = ["mpi", "hpc", "parallel", "distributed"]
@@ -50,5 +50,9 @@ rand = "0.9"
 
 [features]
 default = []
-# Enable this to get detailed debug output
+# Enable RMA (Remote Memory Access) shared memory window operations
+rma = []
+# Enable NUMA-aware shared memory windows and SLURM helpers (implies rma)
+numa = ["rma"]
+# Enable detailed debug output
 debug = []

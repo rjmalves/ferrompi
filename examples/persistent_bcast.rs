@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     let mut bcast_buffer = vec![0.0f64; 1000];
 
     // Try to initialize persistent broadcast
-    match world.bcast_init_f64(&mut bcast_buffer, 0) {
+    match world.bcast_init(&mut bcast_buffer, 0) {
         Ok(mut persistent_bcast) => {
             let num_iterations = 100;
             let start_time = Mpi::wtime();
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     let mut allreduce_send = vec![0.0f64; 500];
     let mut allreduce_recv = vec![0.0f64; 500];
 
-    match world.allreduce_init_f64(&allreduce_send, &mut allreduce_recv, ReduceOp::Sum) {
+    match world.allreduce_init(&allreduce_send, &mut allreduce_recv, ReduceOp::Sum) {
         Ok(mut persistent_allreduce) => {
             let num_iterations = 100;
             let start_time = Mpi::wtime();
@@ -177,7 +177,7 @@ fn main() -> Result<()> {
                     *x = (iter + i) as f64;
                 }
             }
-            world.broadcast_f64(&mut buffer, 0)?;
+            world.broadcast(&mut buffer, 0)?;
         }
         let non_persistent_time = Mpi::wtime() - start;
 
@@ -195,7 +195,7 @@ fn main() -> Result<()> {
     {
         let mut buffer = vec![0.0f64; buffer_size];
 
-        if let Ok(mut persistent) = world.bcast_init_f64(&mut buffer, 0) {
+        if let Ok(mut persistent) = world.bcast_init(&mut buffer, 0) {
             world.barrier()?;
 
             let start = Mpi::wtime();

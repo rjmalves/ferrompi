@@ -1,5 +1,9 @@
 //! Safe wrappers for MPI communicator operations.
+//!
+//! All communication methods are generic over [`MpiDatatype`], supporting
+//! `f32`, `f64`, `i32`, `i64`, `u8`, `u32`, and `u64`.
 
+use crate::datatype::MpiDatatype;
 use crate::error::{Error, Result};
 use crate::ffi;
 use crate::persistent::PersistentRequest;
@@ -95,31 +99,70 @@ impl Communicator {
     }
 
     // ========================================================================
-    // Point-to-Point Communication
+    // Generic Point-to-Point Communication
     // ========================================================================
 
-    /// Send a slice of f64 values to another process.
-    pub fn send_f64(&self, data: &[f64], dest: i32, tag: i32) -> Result<()> {
+    /// Send a slice of values to another process.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Buffer to send
+    /// * `dest` - Destination rank
+    /// * `tag` - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let data = vec![1.0f64, 2.0, 3.0];
+    /// world.send(&data, 1, 0).unwrap();
+    /// ```
+    pub fn send<T: MpiDatatype>(&self, data: &[T], dest: i32, tag: i32) -> Result<()> {
         let ret = unsafe {
-            ffi::ferrompi_send_f64(data.as_ptr(), data.len() as i64, dest, tag, self.handle)
+            ffi::ferrompi_send(
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                dest,
+                tag,
+                self.handle,
+            )
         };
         Error::check(ret)
     }
 
-    /// Receive a slice of f64 values from another process.
+    /// Receive a slice of values from another process.
     ///
     /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
     ///
     /// Returns `(actual_source, actual_tag, actual_count)`.
-    pub fn recv_f64(&self, data: &mut [f64], source: i32, tag: i32) -> Result<(i32, i32, i64)> {
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut buf = vec![0.0f64; 10];
+    /// let (source, tag, count) = world.recv(&mut buf, 0, 0).unwrap();
+    /// ```
+    pub fn recv<T: MpiDatatype>(
+        &self,
+        data: &mut [T],
+        source: i32,
+        tag: i32,
+    ) -> Result<(i32, i32, i64)> {
         let mut actual_source: i32 = 0;
         let mut actual_tag: i32 = 0;
         let mut actual_count: i64 = 0;
 
         let ret = unsafe {
-            ffi::ferrompi_recv_f64(
-                data.as_mut_ptr(),
+            ffi::ferrompi_recv(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
+                T::TAG as i32,
                 source,
                 tag,
                 self.handle,
@@ -133,44 +176,34 @@ impl Communicator {
     }
 
     // ========================================================================
-    // Blocking Collectives
+    // Generic Blocking Collectives
     // ========================================================================
 
-    /// Broadcast a slice of f64 values from root to all processes.
+    /// Broadcast a slice from root to all processes.
     ///
     /// # Arguments
     ///
     /// * `data` - Buffer to broadcast (input at root, output at others)
     /// * `root` - Rank of the root process
-    pub fn broadcast_f64(&self, data: &mut [f64], root: i32) -> Result<()> {
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut data = vec![0.0f64; 100];
+    /// if world.rank() == 0 {
+    ///     data.fill(42.0);
+    /// }
+    /// world.broadcast(&mut data, 0).unwrap();
+    /// ```
+    pub fn broadcast<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
-            ffi::ferrompi_bcast_f64(data.as_mut_ptr(), data.len() as i64, root, self.handle)
-        };
-        Error::check(ret)
-    }
-
-    /// Broadcast a slice of i32 values from root to all processes.
-    pub fn broadcast_i32(&self, data: &mut [i32], root: i32) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_bcast_i32(data.as_mut_ptr(), data.len() as i64, root, self.handle)
-        };
-        Error::check(ret)
-    }
-
-    /// Broadcast a slice of i64 values from root to all processes.
-    pub fn broadcast_i64(&self, data: &mut [i64], root: i32) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_bcast_i64(data.as_mut_ptr(), data.len() as i64, root, self.handle)
-        };
-        Error::check(ret)
-    }
-
-    /// Broadcast raw bytes from root to all processes.
-    pub fn broadcast_bytes(&self, data: &mut [u8], root: i32) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_bcast_bytes(
+            ffi::ferrompi_bcast(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
+                T::TAG as i32,
                 root,
                 self.handle,
             )
@@ -178,7 +211,7 @@ impl Communicator {
         Error::check(ret)
     }
 
-    /// Reduce f64 values to the root process.
+    /// Reduce values to the root process.
     ///
     /// # Arguments
     ///
@@ -186,10 +219,21 @@ impl Communicator {
     /// * `recv` - Buffer for result (only significant at root)
     /// * `op` - Reduction operation
     /// * `root` - Rank of the root process
-    pub fn reduce_f64(
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// world.reduce(&send, &mut recv, ReduceOp::Sum, 0).unwrap();
+    /// ```
+    pub fn reduce<T: MpiDatatype>(
         &self,
-        send: &[f64],
-        recv: &mut [f64],
+        send: &[T],
+        recv: &mut [T],
         op: ReduceOp,
         root: i32,
     ) -> Result<()> {
@@ -197,10 +241,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
-            ffi::ferrompi_reduce_f64(
-                send.as_ptr(),
-                recv.as_mut_ptr(),
+            ffi::ferrompi_reduce(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
+                T::TAG as i32,
                 op as i32,
                 root,
                 self.handle,
@@ -209,22 +254,39 @@ impl Communicator {
         Error::check(ret)
     }
 
-    /// All-reduce f64 values (reduce and broadcast result to all).
+    /// All-reduce values (reduce and broadcast result to all).
     ///
     /// # Arguments
     ///
     /// * `send` - Data to send from this process
     /// * `recv` - Buffer for result
     /// * `op` - Reduction operation
-    pub fn allreduce_f64(&self, send: &[f64], recv: &mut [f64], op: ReduceOp) -> Result<()> {
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![world.rank() as f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// world.allreduce(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// ```
+    pub fn allreduce<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<()> {
         if send.len() != recv.len() {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
-            ffi::ferrompi_allreduce_f64(
-                send.as_ptr(),
-                recv.as_mut_ptr(),
+            ffi::ferrompi_allreduce(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
+                T::TAG as i32,
                 op as i32,
                 self.handle,
             )
@@ -232,33 +294,55 @@ impl Communicator {
         Error::check(ret)
     }
 
-    /// All-reduce a single f64 value.
+    /// All-reduce values in place.
     ///
-    /// Convenience method for reducing a single scalar.
-    pub fn allreduce_scalar(&self, value: f64, op: ReduceOp) -> Result<f64> {
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut data = vec![world.rank() as f64; 10];
+    /// world.allreduce_inplace(&mut data, ReduceOp::Sum).unwrap();
+    /// ```
+    pub fn allreduce_inplace<T: MpiDatatype>(&self, data: &mut [T], op: ReduceOp) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_allreduce_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-reduce a single scalar value.
+    ///
+    /// Convenience method for reducing a single element.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let sum = world.allreduce_scalar(world.rank() as f64, ReduceOp::Sum).unwrap();
+    /// println!("Sum of all ranks: {sum}");
+    /// ```
+    pub fn allreduce_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp) -> Result<T> {
         let send = [value];
-        let mut recv = [0.0];
-        self.allreduce_f64(&send, &mut recv, op)?;
+        // SAFETY: T is Copy, so zero-init is safe for numeric types
+        let mut recv = [value]; // placeholder, will be overwritten
+        self.allreduce(&send, &mut recv, op)?;
         Ok(recv[0])
     }
 
-    /// All-reduce f64 values in place.
-    pub fn allreduce_inplace_f64(&self, data: &mut [f64], op: ReduceOp) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_allreduce_inplace_f64(
-                data.as_mut_ptr(),
-                data.len() as i64,
-                op as i32,
-                self.handle,
-            )
-        };
-        Error::check(ret)
-    }
-
-    /// Gather f64 values to the root process.
+    /// Gather values to the root process.
     ///
-    /// Each process sends `sendcount` elements. Root receives `sendcount * size`
-    /// elements total.
+    /// Each process sends `send.len()` elements. Root receives
+    /// `send.len() * size` elements total.
     ///
     /// # Arguments
     ///
@@ -266,45 +350,81 @@ impl Communicator {
     /// * `recv` - Buffer for received data (only significant at root, must be
     ///   `send.len() * size` elements)
     /// * `root` - Rank of the root process
-    pub fn gather_f64(&self, send: &[f64], recv: &mut [f64], root: i32) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_gather_f64(
-                send.as_ptr(),
-                send.len() as i64,
-                recv.as_mut_ptr(),
-                send.len() as i64,
-                root,
-                self.handle,
-            )
-        };
-        Error::check(ret)
-    }
-
-    /// All-gather f64 values (gather and broadcast to all).
-    pub fn allgather_f64(&self, send: &[f64], recv: &mut [f64]) -> Result<()> {
-        let ret = unsafe {
-            ffi::ferrompi_allgather_f64(
-                send.as_ptr(),
-                send.len() as i64,
-                recv.as_mut_ptr(),
-                send.len() as i64,
-                self.handle,
-            )
-        };
-        Error::check(ret)
-    }
-
-    /// Scatter f64 values from root to all processes.
     ///
-    /// Root sends `recvcount * size` elements total, each process receives
-    /// `recvcount` elements.
-    pub fn scatter_f64(&self, send: &[f64], recv: &mut [f64], root: i32) -> Result<()> {
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![world.rank() as f64; 5];
+    /// let mut recv = vec![0.0f64; 5 * world.size() as usize];
+    /// world.gather(&send, &mut recv, 0).unwrap();
+    /// ```
+    pub fn gather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
-            ffi::ferrompi_scatter_f64(
-                send.as_ptr(),
+            ffi::ferrompi_gather(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-gather values (gather and broadcast to all).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![world.rank() as i32; 3];
+    /// let mut recv = vec![0i32; 3 * world.size() as usize];
+    /// world.allgather(&send, &mut recv).unwrap();
+    /// ```
+    pub fn allgather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_allgather(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Scatter values from root to all processes.
+    ///
+    /// Root sends `recv.len() * size` elements total, each process receives
+    /// `recv.len()` elements.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![0.0f64; 5 * world.size() as usize];
+    /// let mut recv = vec![0.0f64; 5];
+    /// world.scatter(&send, &mut recv, 0).unwrap();
+    /// ```
+    pub fn scatter<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
+        let ret = unsafe {
+            ffi::ferrompi_scatter(
+                send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.len() as i64,
-                recv.as_mut_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
                 recv.len() as i64,
+                T::TAG as i32,
                 root,
                 self.handle,
             )
@@ -313,22 +433,35 @@ impl Communicator {
     }
 
     // ========================================================================
-    // Nonblocking Collectives
+    // Generic Nonblocking Collectives
     // ========================================================================
 
-    /// Nonblocking broadcast of f64 values.
+    /// Nonblocking broadcast.
     ///
     /// Returns a request handle that must be waited on before accessing the buffer.
     ///
-    /// # Safety
+    /// # Safety Note
     ///
     /// The buffer must remain valid until the request is completed.
-    pub fn ibroadcast_f64(&self, data: &mut [f64], root: i32) -> Result<Request> {
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut data = vec![0.0f64; 100];
+    /// let req = world.ibroadcast(&mut data, 0).unwrap();
+    /// // ... do other work ...
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ibroadcast<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<Request> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
-            ffi::ferrompi_ibcast_f64(
-                data.as_mut_ptr(),
+            ffi::ferrompi_ibcast(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
+                T::TAG as i32,
                 root,
                 self.handle,
                 &mut request_handle,
@@ -338,19 +471,37 @@ impl Communicator {
         Ok(Request::new(request_handle))
     }
 
-    /// Nonblocking all-reduce of f64 values.
+    /// Nonblocking all-reduce.
     ///
     /// Returns a request handle that must be waited on before accessing the buffer.
-    pub fn iallreduce_f64(&self, send: &[f64], recv: &mut [f64], op: ReduceOp) -> Result<Request> {
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let req = world.iallreduce(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iallreduce<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<Request> {
         if send.len() != recv.len() {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
-            ffi::ferrompi_iallreduce_f64(
-                send.as_ptr(),
-                recv.as_mut_ptr(),
+            ffi::ferrompi_iallreduce(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
+                T::TAG as i32,
                 op as i32,
                 self.handle,
                 &mut request_handle,
@@ -361,34 +512,49 @@ impl Communicator {
     }
 
     // ========================================================================
-    // Persistent Collectives (MPI 4.0+)
+    // Generic Persistent Collectives (MPI 4.0+)
     // ========================================================================
 
     /// Initialize a persistent broadcast operation.
     ///
     /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
     ///
     /// # Arguments
     ///
     /// * `data` - Buffer to use for broadcasts (must remain valid for lifetime of handle)
     /// * `root` - Rank of the root process
     ///
-    /// # Note
+    /// # Example
     ///
-    /// This requires MPI 4.0+. Returns an error if not supported.
-    pub fn bcast_init_f64(&self, data: &mut [f64], root: i32) -> Result<PersistentRequest> {
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut data = vec![0.0f64; 100];
+    /// let mut persistent = world.bcast_init(&mut data, 0).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn bcast_init<T: MpiDatatype>(
+        &self,
+        data: &mut [T],
+        root: i32,
+    ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
-            ffi::ferrompi_bcast_init_f64(
-                data.as_mut_ptr(),
+            ffi::ferrompi_bcast_init(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
+                T::TAG as i32,
                 root,
                 self.handle,
                 &mut request_handle,
             )
         };
         if ret != 0 {
-            // Check if it's an "unsupported" error
             return Err(Error::NotSupported(
                 "Persistent collectives require MPI 4.0+".into(),
             ));
@@ -398,13 +564,26 @@ impl Communicator {
 
     /// Initialize a persistent all-reduce operation.
     ///
-    /// # Note
+    /// Requires MPI 4.0+.
     ///
-    /// This requires MPI 4.0+.
-    pub fn allreduce_init_f64(
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.allreduce_init(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn allreduce_init<T: MpiDatatype>(
         &self,
-        send: &[f64],
-        recv: &mut [f64],
+        send: &[T],
+        recv: &mut [T],
         op: ReduceOp,
     ) -> Result<PersistentRequest> {
         if send.len() != recv.len() {
@@ -412,10 +591,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
-            ffi::ferrompi_allreduce_init_f64(
-                send.as_ptr(),
-                recv.as_mut_ptr(),
+            ffi::ferrompi_allreduce_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
+                T::TAG as i32,
                 op as i32,
                 self.handle,
                 &mut request_handle,
@@ -430,17 +610,50 @@ impl Communicator {
     }
 
     /// Initialize a persistent in-place all-reduce operation.
-    pub fn allreduce_init_inplace_f64(
+    ///
+    /// Requires MPI 4.0+.
+    pub fn allreduce_init_inplace<T: MpiDatatype>(
         &self,
-        data: &mut [f64],
+        data: &mut [T],
         op: ReduceOp,
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
-            ffi::ferrompi_allreduce_init_inplace_f64(
-                data.as_mut_ptr(),
+            ffi::ferrompi_allreduce_init_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
+                T::TAG as i32,
                 op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent gather operation.
+    ///
+    /// Requires MPI 4.0+.
+    pub fn gather_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_gather_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                root,
                 self.handle,
                 &mut request_handle,
             )
