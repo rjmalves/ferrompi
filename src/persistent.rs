@@ -16,7 +16,7 @@
 //! let mut data = vec![0.0f64; 1000];
 //!
 //! // Initialize persistent broadcast (MPI 4.0+)
-//! let mut persistent = world.bcast_init_f64(&mut data, 0).unwrap();
+//! let mut persistent = world.bcast_init(&mut data, 0).unwrap();
 //!
 //! // Run many iterations
 //! for iter in 0..1000 {
@@ -52,7 +52,7 @@ use crate::ffi;
 ///
 /// # Lifecycle
 ///
-/// 1. Create with `comm.bcast_init_f64()` or similar
+/// 1. Create with `comm.bcast_init()` or similar
 /// 2. Start with `start()` or `start_all()`
 /// 3. Wait for completion with `wait()`
 /// 4. Repeat steps 2-3 as needed
@@ -189,5 +189,81 @@ impl Drop for PersistentRequest {
         }
         // Free the persistent request
         unsafe { ffi::ferrompi_request_free(self.handle) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::forget;
+
+    #[test]
+    fn new_request_is_inactive() {
+        let req = PersistentRequest::new(0);
+        assert!(!req.is_active());
+        assert_eq!(req.raw_handle(), 0);
+        forget(req);
+    }
+
+    #[test]
+    fn raw_handle_returns_constructor_value() {
+        let req = PersistentRequest::new(42);
+        assert_eq!(req.raw_handle(), 42);
+        forget(req);
+    }
+
+    #[test]
+    fn start_when_already_active_returns_error() {
+        let mut req = PersistentRequest {
+            handle: 0,
+            active: true,
+        };
+        let result = req.start();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, Error::Internal(msg) if msg.contains("already active")),
+            "expected Error::Internal containing 'already active', got: {err}"
+        );
+        forget(req);
+    }
+
+    #[test]
+    fn test_when_inactive_returns_true() {
+        let mut req = PersistentRequest::new(0);
+        let result = req.test();
+        assert!(
+            matches!(result, Ok(true)),
+            "expected Ok(true), got: {result:?}"
+        );
+        forget(req);
+    }
+
+    #[test]
+    fn start_all_empty_slice_returns_ok() {
+        let result = PersistentRequest::start_all(&mut []);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn start_all_with_active_request_returns_error() {
+        let mut req = PersistentRequest {
+            handle: 0,
+            active: true,
+        };
+        let result = PersistentRequest::start_all(std::slice::from_mut(&mut req));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, Error::Internal(msg) if msg.contains("already active")),
+            "expected Error::Internal containing 'already active', got: {err}"
+        );
+        forget(req);
+    }
+
+    #[test]
+    fn wait_all_empty_slice_returns_ok() {
+        let result = PersistentRequest::wait_all(&mut []);
+        assert!(result.is_ok());
     }
 }

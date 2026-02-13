@@ -19,13 +19,13 @@ fn main() -> Result<()> {
     // Test 1: Broadcast
     // ============================================================
     {
-        let mut data = if rank == 0 {
+        let mut data: Vec<f64> = if rank == 0 {
             vec![1.0, 2.0, 3.0, 4.0, 5.0]
         } else {
             vec![0.0; 5]
         };
 
-        world.broadcast_f64(&mut data, 0)?;
+        world.broadcast(&mut data, 0)?;
 
         let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         assert_eq!(data, expected, "Broadcast failed on rank {}", rank);
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         let send = vec![rank as f64 + 1.0; 3]; // Each rank sends [rank+1, rank+1, rank+1]
         let mut recv = vec![0.0; 3];
 
-        world.reduce_f64(&send, &mut recv, ReduceOp::Sum, 0)?;
+        world.reduce(&send, &mut recv, ReduceOp::Sum, 0)?;
 
         if rank == 0 {
             // Sum of 1 + 2 + ... + size
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
         let send = vec![rank as f64 * 10.0];
         let mut recv = vec![0.0];
 
-        world.reduce_f64(&send, &mut recv, ReduceOp::Max, 0)?;
+        world.reduce(&send, &mut recv, ReduceOp::Max, 0)?;
 
         if rank == 0 {
             let expected = (size - 1) as f64 * 10.0;
@@ -76,7 +76,7 @@ fn main() -> Result<()> {
         let send = vec![1.0; 4];
         let mut recv = vec![0.0; 4];
 
-        world.allreduce_f64(&send, &mut recv, ReduceOp::Sum)?;
+        world.allreduce(&send, &mut recv, ReduceOp::Sum)?;
 
         let expected = vec![size as f64; 4];
         assert_eq!(recv, expected, "Allreduce Sum failed on rank {}", rank);
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
     {
         let mut data = vec![rank as f64; 3];
 
-        world.allreduce_inplace_f64(&mut data, ReduceOp::Sum)?;
+        world.allreduce_inplace(&mut data, ReduceOp::Sum)?;
 
         // Sum of 0 + 1 + ... + (size-1)
         let expected: f64 = (0..size).map(|x| x as f64).sum();
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
             vec![] // Not used on non-root
         };
 
-        world.gather_f64(&send, &mut recv, 0)?;
+        world.gather(&send, &mut recv, 0)?;
 
         if rank == 0 {
             // Check the gathered data
@@ -159,7 +159,7 @@ fn main() -> Result<()> {
         let send = vec![rank as f64];
         let mut recv = vec![0.0; size as usize];
 
-        world.allgather_f64(&send, &mut recv)?;
+        world.allgather(&send, &mut recv)?;
 
         for r in 0..size {
             assert_eq!(
@@ -185,7 +185,7 @@ fn main() -> Result<()> {
         };
         let mut recv = vec![0.0; 2];
 
-        world.scatter_f64(&send, &mut recv, 0)?;
+        world.scatter(&send, &mut recv, 0)?;
 
         let expected_start = rank * 2;
         assert_eq!(

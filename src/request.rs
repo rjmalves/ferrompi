@@ -21,7 +21,7 @@ use crate::ffi;
 /// let mut recv = vec![0.0; 10];
 ///
 /// // Start nonblocking all-reduce
-/// let request = world.iallreduce_f64(&send, &mut recv, ReduceOp::Sum).unwrap();
+/// let request = world.iallreduce(&send, &mut recv, ReduceOp::Sum).unwrap();
 ///
 /// // Do other work while communication proceeds...
 ///
@@ -114,5 +114,57 @@ impl Drop for Request {
             // leaving the operation in an undefined state
             unsafe { ffi::ferrompi_wait(self.handle) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::forget;
+
+    #[test]
+    fn new_request_is_not_completed() {
+        let req = Request::new(0);
+        assert!(!req.is_completed());
+        assert_eq!(req.raw_handle(), 0);
+        forget(req);
+    }
+
+    #[test]
+    fn raw_handle_returns_constructor_value() {
+        let req = Request::new(99);
+        assert_eq!(req.raw_handle(), 99);
+        forget(req);
+    }
+
+    #[test]
+    fn test_when_already_completed_returns_true() {
+        let mut req = Request {
+            handle: 0,
+            completed: true,
+        };
+        let result = req.test();
+        assert!(matches!(result, Ok(true)));
+        forget(req);
+    }
+
+    #[test]
+    fn wait_when_already_completed_returns_ok() {
+        // wait() takes self by value (consuming).
+        // With completed: true, it returns Ok(()) on line 63 before any FFI.
+        // Drop then runs, but !self.completed is false, so Drop is a no-op.
+        let req = Request {
+            handle: 0,
+            completed: true,
+        };
+        let result = req.wait();
+        assert!(result.is_ok());
+        // No forget() needed — wait() consumed the value, and Drop was a no-op
+    }
+
+    #[test]
+    fn wait_all_empty_vec_returns_ok() {
+        let result = Request::wait_all(vec![]);
+        assert!(result.is_ok());
     }
 }

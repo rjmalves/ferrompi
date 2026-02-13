@@ -1,10 +1,10 @@
 [package]
 name = "ferrompi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Rogerio Alves"]
-description = "A thin wrapper for Rust to access the C API of MPICH / OpenMP"
+description = "A safe, generic Rust wrapper for MPI with support for MPI 4.0+ features, shared memory windows, and hybrid MPI+OpenMP"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rjmalves/ferrompi"
 keywords = ["mpi", "hpc", "parallel", "distributed"]
@@ -38,6 +38,68 @@ path = "examples/nonblocking.rs"
 name = "pi_monte_carlo"
 path = "examples/pi_monte_carlo.rs"
 
+[[example]]
+name = "hybrid_openmp"
+path = "examples/hybrid_openmp.rs"
+
+[[example]]
+name = "comm_split"
+path = "examples/comm_split.rs"
+
+[[example]]
+name = "scan"
+path = "examples/scan.rs"
+
+[[example]]
+name = "gatherv"
+path = "examples/gatherv.rs"
+
+[[example]]
+name = "test_rma_window"
+path = "examples/test_rma_window.rs"
+required-features = ["rma"]
+
+[[example]]
+name = "shared_memory"
+path = "examples/shared_memory.rs"
+required-features = ["rma"]
+
+[[example]]
+name = "test_collectives"
+path = "examples/test_collectives.rs"
+
+[[example]]
+name = "test_nonblocking"
+path = "examples/test_nonblocking.rs"
+
+[[example]]
+name = "test_comm_split"
+path = "examples/test_comm_split.rs"
+
+[[example]]
+name = "test_p2p_extra"
+path = "examples/test_p2p_extra.rs"
+
+[[example]]
+name = "test_blocking_extra"
+path = "examples/test_blocking_extra.rs"
+
+[[example]]
+name = "test_nonblocking_collectives"
+path = "examples/test_nonblocking_collectives.rs"
+
+[[example]]
+name = "test_lifecycle"
+path = "examples/test_lifecycle.rs"
+
+[[example]]
+name = "test_info"
+path = "examples/test_info.rs"
+
+[[example]]
+name = "test_persistent"
+path = "examples/test_persistent.rs"
+
 [dependencies]
 thiserror = "2.0"
 
@@ -50,5 +112,9 @@ rand = "0.9"
 
 [features]
 default = []
-# Enable this to get detailed debug output
+# Enable RMA (Remote Memory Access) shared memory window operations
+rma = []
+# Enable NUMA-aware shared memory windows and SLURM helpers (implies rma)
+numa = ["rma"]
+# Enable detailed debug output
 debug = []

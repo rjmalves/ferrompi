@@ -65,15 +65,15 @@ fn main() -> Result<()> {
     // Reduce all counts to rank 0
     let send = [local_inside_f64];
     let mut recv = [0.0];
-    world.reduce_f64(&send, &mut recv, ReduceOp::Sum, 0)?;
+    world.reduce(&send, &mut recv, ReduceOp::Sum, 0)?;
     let global_inside_f64 = recv[0];
 
     let elapsed = Mpi::wtime() - start_time;
 
     // Also get global timing statistics
-    world.reduce_f64(&[elapsed], [0.0].as_mut_slice(), ReduceOp::Max, 0)?;
+    world.reduce(&[elapsed], [0.0].as_mut_slice(), ReduceOp::Max, 0)?;
     let max_time = recv[0];
-    world.reduce_f64(&[elapsed], &mut recv, ReduceOp::Min, 0)?;
+    world.reduce(&[elapsed], &mut recv, ReduceOp::Min, 0)?;
     let min_time = recv[0];
 
     if rank == 0 {
@@ -115,7 +115,7 @@ fn main() -> Result<()> {
     };
 
     let mut pi_buf = [pi_estimate];
-    world.broadcast_f64(&mut pi_buf, 0)?;
+    world.broadcast(&mut pi_buf, 0)?;
     pi_estimate = pi_buf[0];
 
     // Each process verifies the result is reasonable

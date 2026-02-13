@@ -1,10 +1,19 @@
 //! # ferrompi
 //!
-//! Thin MPI 4.x bindings for the powers-rs SDDP implementation.
+//! Safe, generic Rust bindings for MPI (Message Passing Interface).
 //!
-//! This crate provides access to MPI functionality through a C wrapper layer,
-//! enabling use of MPI 4.0+ features like persistent collectives that are not
-//! available in the `rsmpi` crate.
+//! This crate wraps MPI functionality through a thin C layer, providing:
+//! - Type-safe generic API for all MPI datatypes
+//! - Blocking, nonblocking, and persistent (MPI 4.0+) collectives
+//! - Communicator management (split, duplicate)
+//! - RMA shared memory windows (with `rma` feature)
+//! - SLURM environment helpers (with `numa` feature)
+//! - Large count support (MPI 4.0+ `_c` variants)
+//!
+//! ## Supported Types
+//!
+//! All communication operations are generic over [`MpiDatatype`]:
+//! `f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`
 //!
 //! ## Quick Start
 //!
@@ -12,34 +21,111 @@
 //! use ferrompi::{Mpi, ReduceOp};
 //!
 //! fn main() -> Result<(), ferrompi::Error> {
-//!     // Initialize MPI
 //!     let mpi = Mpi::init()?;
 //!     let world = mpi.world();
 //!
 //!     let rank = world.rank();
 //!     let size = world.size();
-//!
 //!     println!("Hello from rank {} of {}", rank, size);
 //!
-//!     // Synchronize
-//!     world.barrier()?;
+//!     // Generic broadcast — works with any MpiDatatype
+//!     let mut data = vec![0.0f64; 100];
+//!     if rank == 0 {
+//!         data.fill(42.0);
+//!     }
+//!     world.broadcast(&mut data, 0)?;
 //!
-//!     // All-reduce example
-//!     let my_value = rank as f64;
-//!     let sum = world.allreduce_scalar(my_value, ReduceOp::Sum)?;
-//!     println!("Rank {}: sum of all ranks = {}", rank, sum);
+//!     // Generic all-reduce
+//!     let sum = world.allreduce_scalar(rank as f64, ReduceOp::Sum)?;
+//!     println!("Rank {rank}: sum of all ranks = {sum}");
 //!
 //!     Ok(())
-//!     // MPI finalized on drop
 //! }
 //! ```
 //!
-//! ## Features
+//! ## Feature Flags
 //!
-//! - **Basic collectives**: barrier, broadcast, reduce, allreduce, gather, scatter
-//! - **Nonblocking collectives**: ibcast, iallreduce with request handles
-//! - **Persistent collectives** (MPI 4.0+): `bcast_init`, `allreduce_init`, etc.
-//! - **Large count support** (MPI 4.0+): automatic use of `_c` variants for large arrays
+//! | Feature | Description | Dependencies |
+//! |---------|-------------|--------------|
+//! | `rma`   | RMA shared memory window operations | — |
+//! | `numa`  | NUMA-aware windows and SLURM helpers | `rma` |
+//! | `debug` | Detailed debug output | — |
+//!
+//! ## Capabilities
+//!
+//! - **Generic API**: All operations work with any [`MpiDatatype`] (`f32`, `f64`, `i32`, `i64`, `u8`, `u32`, `u64`)
+//! - **Blocking collectives**: barrier, broadcast, reduce, allreduce, gather, scatter, allgather,
+//!   alltoall, scan, exscan, reduce\_scatter\_block, plus V-variants (gatherv, scatterv, allgatherv, alltoallv)
+//! - **Nonblocking collectives**: All 13 `i`-prefixed variants with [`Request`] handles
+//! - **Persistent collectives** (MPI 4.0+): All 11+ `_init` variants with [`PersistentRequest`] handles
+//! - **Scalar and in-place variants**: `reduce_scalar`, `allreduce_scalar`, `reduce_inplace`,
+//!   `allreduce_inplace`, `scan_scalar`, `exscan_scalar`
+//! - **Point-to-point**: `send`, `recv`, `isend`, `irecv`, `sendrecv`, `probe`, `iprobe`
+//! - **Communicator management**: `split`, `split_type`, `split_shared`, `duplicate`
+//! - **Shared memory windows** (feature `rma`): [`SharedWindow<T>`] with RAII lock guards
+//! - **SLURM helpers** (feature `numa`): Job topology queries via `slurm` module
+//! - **Rich error handling**: [`MpiErrorClass`] categorization with messages from the MPI runtime
+//!
+//! ## Thread Safety
+//!
+//! [`Communicator`] is `Send + Sync` to support hybrid MPI + threads programs
+//! (e.g., MPI between nodes, `std::thread::scope` within a node).
+//!
+//! The actual thread-safety guarantees depend on the thread level requested
+//! at initialization:
+//!
+//! | Thread Level | Who can call MPI | Synchronization |
+//! |--------------|------------------|-----------------|
+//! | [`ThreadLevel::Single`] | Main thread only | N/A |
+//! | [`ThreadLevel::Funneled`] | Main thread only | N/A |
+//! | [`ThreadLevel::Serialized`] | Any thread | User must serialize |
+//! | [`ThreadLevel::Multiple`] | Any thread | None needed |
+//!
+//! ```no_run
+//! use ferrompi::{Mpi, ThreadLevel};
+//!
+//! // Request serialized thread support for hybrid MPI + threads
+//! let mpi = Mpi::init_thread(ThreadLevel::Funneled).unwrap();
+//! assert!(mpi.thread_level() >= ThreadLevel::Funneled);
+//! ```
+//!
+//! [`Mpi`] itself is `!Send + !Sync` — MPI initialization and finalization
+//! must occur on the same thread. Only [`Communicator`] handles (and the
+//! operations on them) may cross thread boundaries.
+//!
+//! ## Hybrid MPI+OpenMP
+//!
+//! For hybrid parallelism, use [`Mpi::init_thread()`] with the appropriate level:
+//!
+//! - **[`Funneled`](ThreadLevel::Funneled)** (recommended): Only the main thread makes MPI calls.
+//!   OpenMP threads handle computation between MPI calls.
+//! - **[`Serialized`](ThreadLevel::Serialized)**: Any thread can make MPI calls, but only one at a time.
+//! - **[`Multiple`](ThreadLevel::Multiple)**: Full concurrent MPI from any thread (highest overhead).
+//!
+//! ```no_run
+//! use ferrompi::{Mpi, ThreadLevel, ReduceOp};
+//!
+//! let mpi = Mpi::init_thread(ThreadLevel::Funneled).unwrap();
+//! assert!(mpi.thread_level() >= ThreadLevel::Funneled);
+//!
+//! let world = mpi.world();
+//! // Worker threads compute locally, main thread calls MPI
+//! let local = 42.0_f64;
+//! let global = world.allreduce_scalar(local, ReduceOp::Sum).unwrap();
+//! ```
+//!
+//! ### SLURM Configuration
+//!
+//! ```bash
+//! #SBATCH --ntasks-per-node=4        # MPI ranks per node
+//! #SBATCH --cpus-per-task=8          # OpenMP threads per rank
+//! #SBATCH --bind-to core             # Pin MPI ranks
+//! export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+//! srun ./my_program
+//! ```
+//!
+//! Use the `slurm` module (with `numa` feature) to read these values at runtime.
+//! See `examples/hybrid_openmp.rs` for the full pattern.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
@@ -55,15 +141,27 @@
 #![allow(clippy::similar_names)]
 
 mod comm;
+mod datatype;
 mod error;
 mod ffi;
+mod info;
 mod persistent;
 mod request;
+#[cfg(feature = "numa")]
+pub mod slurm;
+mod status;
+#[cfg(feature = "rma")]
+mod window;
 
-pub use comm::Communicator;
-pub use error::{Error, Result};
+pub use comm::{Communicator, SplitType};
+pub use datatype::{DatatypeTag, MpiDatatype};
+pub use error::{Error, MpiErrorClass, Result};
+pub use info::Info;
 pub use persistent::PersistentRequest;
 pub use request::Request;
+pub use status::Status;
+#[cfg(feature = "rma")]
+pub use window::{LockAllGuard, LockGuard, LockType, SharedWindow};
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -240,4 +338,78 @@ impl Drop for Mpi {
 mod tests {
     // Note: MPI tests must be run with mpiexec
     // cargo build --examples && mpiexec -n 4 ./target/debug/examples/hello_world
+
+    use super::*;
+
+    // ── ThreadLevel tests ──────────────────────────────────────────────
+
+    #[test]
+    fn thread_level_ordering() {
+        assert!(ThreadLevel::Single < ThreadLevel::Funneled);
+        assert!(ThreadLevel::Funneled < ThreadLevel::Serialized);
+        assert!(ThreadLevel::Serialized < ThreadLevel::Multiple);
+        // Transitive: smallest < largest
+        assert!(ThreadLevel::Single < ThreadLevel::Multiple);
+    }
+
+    #[test]
+    fn thread_level_equality() {
+        assert_eq!(ThreadLevel::Single, ThreadLevel::Single);
+        assert_eq!(ThreadLevel::Funneled, ThreadLevel::Funneled);
+        assert_eq!(ThreadLevel::Serialized, ThreadLevel::Serialized);
+        assert_eq!(ThreadLevel::Multiple, ThreadLevel::Multiple);
+        assert_ne!(ThreadLevel::Single, ThreadLevel::Multiple);
+        assert_ne!(ThreadLevel::Funneled, ThreadLevel::Serialized);
+    }
+
+    #[test]
+    fn thread_level_repr_values() {
+        assert_eq!(ThreadLevel::Single as i32, 0);
+        assert_eq!(ThreadLevel::Funneled as i32, 1);
+        assert_eq!(ThreadLevel::Serialized as i32, 2);
+        assert_eq!(ThreadLevel::Multiple as i32, 3);
+    }
+
+    #[test]
+    fn thread_level_debug_clone() {
+        let level = ThreadLevel::Funneled;
+        let cloned = level;
+        assert_eq!(format!("{cloned:?}"), "Funneled");
+
+        assert_eq!(format!("{:?}", ThreadLevel::Single), "Single");
+        assert_eq!(format!("{:?}", ThreadLevel::Serialized), "Serialized");
+        assert_eq!(format!("{:?}", ThreadLevel::Multiple), "Multiple");
+    }
+
+    // ── ReduceOp tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn reduce_op_repr_values() {
+        assert_eq!(ReduceOp::Sum as i32, 0);
+        assert_eq!(ReduceOp::Max as i32, 1);
+        assert_eq!(ReduceOp::Min as i32, 2);
+        assert_eq!(ReduceOp::Prod as i32, 3);
+    }
+
+    #[test]
+    fn reduce_op_equality() {
+        assert_eq!(ReduceOp::Sum, ReduceOp::Sum);
+        assert_eq!(ReduceOp::Max, ReduceOp::Max);
+        assert_eq!(ReduceOp::Min, ReduceOp::Min);
+        assert_eq!(ReduceOp::Prod, ReduceOp::Prod);
+        assert_ne!(ReduceOp::Sum, ReduceOp::Max);
+        assert_ne!(ReduceOp::Min, ReduceOp::Prod);
+        assert_ne!(ReduceOp::Sum, ReduceOp::Prod);
+    }
+
+    #[test]
+    fn reduce_op_debug_clone() {
+        let op = ReduceOp::Sum;
+        let cloned = op;
+        assert_eq!(format!("{cloned:?}"), "Sum");
+
+        assert_eq!(format!("{:?}", ReduceOp::Max), "Max");
+        assert_eq!(format!("{:?}", ReduceOp::Min), "Min");
+        assert_eq!(format!("{:?}", ReduceOp::Prod), "Prod");
+    }
 }
