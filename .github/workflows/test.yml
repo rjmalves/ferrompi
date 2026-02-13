@@ -71,19 +71,23 @@ jobs:
           # Workaround for broken MPICH 4.2.0 package in Ubuntu 24.04 LTS (Noble)
           # See: https://bugs.launchpad.net/ubuntu/+source/mpich/+bug/2072338
           # See: https://github.com/mpi4py/setup-mpi/issues/13
+          # Adapted from https://github.com/mpi4py/setup-mpi/blob/master/setup-mpi.sh
           ARCH=$(dpkg --print-architecture)
           REPO=https://archive.ubuntu.com/ubuntu
-          LIBUCX=libucx0_1.17.0+ds-3build1_${ARCH}.deb
-          LIBMPICH=libmpich12_4.2.0-14_${ARCH}.deb
-          curl -sSO ${REPO}/pool/universe/u/ucx/${LIBUCX}
-          curl -sSO ${REPO}/pool/universe/m/mpich/${LIBMPICH}
+          LIBUCX=libucx0_1.18.1+ds-2_${ARCH}.deb
+          LIBMPICH=libmpich12_4.2.1-5_${ARCH}.deb
+          curl -sSOf ${REPO}/pool/universe/u/ucx/${LIBUCX}
+          curl -sSOf ${REPO}/pool/universe/m/mpich/${LIBMPICH}
           TMPDIR=$(mktemp -d)
           dpkg-deb -x ${LIBUCX} ${TMPDIR}
           dpkg-deb -x ${LIBMPICH} ${TMPDIR}
-          LIBDIR=/usr/lib/$(uname -m)-linux-gnu
-          sudo cp -r ${TMPDIR}${LIBDIR}/ucx ${LIBDIR}
-          sudo cp ${TMPDIR}${LIBDIR}/libuc[mpst]*.so.0.*.* ${LIBDIR}
-          sudo cp ${TMPDIR}${LIBDIR}/libmpich*.so.12.*.* ${LIBDIR}
+          LIBDIR=/usr/lib/$(arch)-linux-gnu
+          sudo cp -a ${TMPDIR}${LIBDIR}/ucx ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libuc[mpst]*.so.0.*.* ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libuc[mpst]*.so.0 ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libmpi*.so.12.*.* ${LIBDIR}
+          sudo cp -a ${TMPDIR}${LIBDIR}/libmpi*.so.12 ${LIBDIR}
+          sudo ldconfig
           rm -rf ${TMPDIR} ${LIBUCX} ${LIBMPICH}
           echo "MPICH hotfix applied successfully"
 
