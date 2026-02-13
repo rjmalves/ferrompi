@@ -31,6 +31,12 @@ extern "C" {
     pub fn ferrompi_comm_size(comm: int32_t, size: *mut int32_t) -> c_int;
     pub fn ferrompi_comm_dup(comm: int32_t, newcomm: *mut int32_t) -> c_int;
     pub fn ferrompi_comm_free(comm: int32_t) -> c_int;
+    pub fn ferrompi_comm_split(
+        comm: int32_t,
+        color: int32_t,
+        key: int32_t,
+        newcomm: *mut int32_t,
+    ) -> c_int;
 
     // ============================================================
     // Synchronization

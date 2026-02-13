@@ -116,6 +116,19 @@ int ferrompi_comm_dup(int32_t comm, int32_t* newcomm);
  */
 int ferrompi_comm_free(int32_t comm);
 
+/**
+ * Split a communicator into sub-communicators based on color and key.
+ * Processes with the same color are placed in the same new communicator.
+ * The key controls rank ordering within the new communicator.
+ * Pass color=-1 to opt out (maps to MPI_UNDEFINED); newcomm will be set to -1.
+ * @param comm Source communicator handle
+ * @param color Color value (sub-communicator identifier, or -1 for MPI_UNDEFINED)
+ * @param key Key value (rank ordering control)
+ * @param newcomm Output: new communicator handle (-1 if process opted out)
+ * @return MPI error code
+ */
+int ferrompi_comm_split(int32_t comm, int32_t color, int32_t key, int32_t* newcomm);
+
 /* ============================================================
  * Synchronization
  * ============================================================ */

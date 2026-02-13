@@ -34,6 +34,12 @@ pub struct Communicator {
 }
 
 impl Communicator {
+    /// Constant for opting out of a communicator split.
+    ///
+    /// Processes passing this as the `color` to [`split()`](Self::split) will not be
+    /// included in any resulting communicator.
+    pub const UNDEFINED: i32 = -1;
+
     /// Get a handle to `MPI_COMM_WORLD`.
     pub(crate) fn world() -> Self {
         Communicator {
@@ -83,6 +89,39 @@ impl Communicator {
             handle: new_handle,
             _marker: PhantomData,
         })
+    }
+
+    /// Split this communicator into sub-communicators based on color and key.
+    ///
+    /// Processes with the same `color` are placed in the same new communicator.
+    /// The `key` controls the rank ordering within the new communicator.
+    ///
+    /// Returns `None` if this process used [`Communicator::UNDEFINED`] as color.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let color = world.rank() % 2; // Even/odd split
+    /// if let Some(sub) = world.split(color, world.rank()).unwrap() {
+    ///     println!("Rank {} in sub-communicator of size {}", sub.rank(), sub.size());
+    /// }
+    /// ```
+    pub fn split(&self, color: i32, key: i32) -> Result<Option<Communicator>> {
+        let mut new_handle: i32 = 0;
+        let ret = unsafe { ffi::ferrompi_comm_split(self.handle, color, key, &mut new_handle) };
+        Error::check(ret)?;
+        if new_handle < 0 {
+            Ok(None)
+        } else {
+            Ok(Some(Communicator {
+                handle: new_handle,
+                _marker: PhantomData,
+            }))
+        }
     }
 
     // ========================================================================

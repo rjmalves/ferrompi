@@ -316,6 +316,25 @@ int ferrompi_comm_free(int32_t comm_handle) {
     return ret;
 }
 
+int ferrompi_comm_split(int32_t comm_handle, int32_t color, int32_t key, int32_t* newcomm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    int mpi_color = (color == -1) ? MPI_UNDEFINED : color;
+    MPI_Comm newcomm;
+    int ret = MPI_Comm_split(comm, mpi_color, key, &newcomm);
+    if (ret == MPI_SUCCESS) {
+        if (newcomm == MPI_COMM_NULL) {
+            *newcomm_handle = -1;  // Process opted out
+        } else {
+            *newcomm_handle = alloc_comm(newcomm);
+            if (*newcomm_handle < 0) {
+                MPI_Comm_free(&newcomm);
+                return MPI_ERR_OTHER;
+            }
+        }
+    }
+    return ret;
+}
+
 /* ============================================================
  * Synchronization
  * ============================================================ */
