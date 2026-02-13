@@ -1,7 +1,7 @@
 {
   "plan": "code-coverage-improvement",
   "created": "2026-02-13",
-  "last_updated": "2026-02-13T21:00:00Z",
+  "last_updated": "2026-02-13T22:00:00Z",
   "tickets": {
     "ticket-001": {
       "title": "Coverage runner script",
@@ -76,30 +76,30 @@
     "ticket-011": {
       "title": "Communicator management coverage",
       "epic": "epic-06-comm-management",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T22:00:00Z"
     },
     "ticket-012": {
       "title": "Error and Info module coverage",
       "epic": "epic-07-support-modules",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T22:00:00Z"
     },
     "ticket-013": {
       "title": "SharedWindow coverage",
       "epic": "epic-08-rma-window",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T22:00:00Z"
     },
     "ticket-014": {
       "title": "SLURM module coverage",
       "epic": "epic-08-rma-window",
-      "status": "pending",
-      "completed_by": null,
-      "completed_at": null
+      "status": "completed",
+      "completed_by": "hpc-rust-developer",
+      "completed_at": "2026-02-13T22:00:00Z"
     }
   }
 }

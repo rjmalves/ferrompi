@@ -18,10 +18,10 @@
 | 008    | Nonblocking    | Request coverage extras           | `completed` | 001, 002     |
 | 009    | Persistent     | Persistent collective operations  | `completed` | 001          |
 | 010    | Persistent     | Persistent request drop coverage  | `completed` | 009          |
-| 011    | Comm Mgmt      | Communicator management coverage  | `pending`   | 001, 002     |
-| 012    | Support        | Error and Info module coverage    | `pending`   | 001          |
-| 013    | RMA            | SharedWindow coverage             | `pending`   | 001          |
-| 014    | RMA            | SLURM module coverage             | `pending`   | 001, 013     |
+| 011    | Comm Mgmt      | Communicator management coverage  | `completed` | 001, 002     |
+| 012    | Support        | Error and Info module coverage    | `completed` | 001          |
+| 013    | RMA            | SharedWindow coverage             | `completed` | 001          |
+| 014    | RMA            | SLURM module coverage             | `completed` | 001, 013     |
 
 ## Dependency Graph
 

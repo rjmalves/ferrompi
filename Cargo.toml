@@ -55,6 +55,11 @@ name = "gatherv"
 path = "examples/gatherv.rs"
 
 [[example]]
+name = "test_rma_window"
+path = "examples/test_rma_window.rs"
+required-features = ["rma"]
+
+[[example]]
 name = "shared_memory"
 path = "examples/shared_memory.rs"
 required-features = ["rma"]
@@ -86,6 +91,10 @@ path = "examples/test_nonblocking_collectives.rs"
 [[example]]
 name = "test_lifecycle"
 path = "examples/test_lifecycle.rs"
+
+[[example]]
+name = "test_info"
+path = "examples/test_info.rs"
 
 [[example]]
 name = "test_persistent"
