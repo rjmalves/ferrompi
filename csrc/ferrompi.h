@@ -549,6 +549,45 @@ int ferrompi_ibcast(void* buf, int64_t count, int32_t datatype_tag, int32_t root
 /** Nonblocking all-reduce (generic) */
 int ferrompi_iallreduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
 
+/** Nonblocking reduce (generic) */
+int ferrompi_ireduce(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking gather (generic) */
+int ferrompi_igather(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking all-gather (generic) */
+int ferrompi_iallgather(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Nonblocking scatter (generic) */
+int ferrompi_iscatter(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking barrier */
+int ferrompi_ibarrier(int32_t comm, int64_t* request);
+
+/** Nonblocking inclusive scan (generic) */
+int ferrompi_iscan(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Nonblocking exclusive scan (generic) */
+int ferrompi_iexscan(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Nonblocking all-to-all (generic) */
+int ferrompi_ialltoall(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Nonblocking gatherv (generic, variable-count) */
+int ferrompi_igatherv(const void* sendbuf, int64_t sendcount, void* recvbuf, const int32_t* recvcounts, const int32_t* displs, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking scatterv (generic, variable-count) */
+int ferrompi_iscatterv(const void* sendbuf, const int32_t* sendcounts, const int32_t* displs, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Nonblocking all-gatherv (generic, variable-count) */
+int ferrompi_iallgatherv(const void* sendbuf, int64_t sendcount, void* recvbuf, const int32_t* recvcounts, const int32_t* displs, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Nonblocking all-to-allv (generic, variable-count) */
+int ferrompi_ialltoallv(const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls, void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Nonblocking reduce-scatter with uniform block size (generic) */
+int ferrompi_ireduce_scatter_block(const void* sendbuf, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
 /* ============================================================
  * Generic Persistent Collectives (MPI 4.0+)
  * ============================================================ */
@@ -564,6 +603,39 @@ int ferrompi_allreduce_init_inplace(void* buf, int64_t count, int32_t datatype_t
 
 /** Initialize persistent gather (generic) */
 int ferrompi_gather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent reduce (generic) */
+int ferrompi_reduce_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent scatter (generic) */
+int ferrompi_scatter_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-gather (generic) */
+int ferrompi_allgather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Initialize persistent scan (generic) */
+int ferrompi_scan_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Initialize persistent exclusive scan (generic) */
+int ferrompi_exscan_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-to-all (generic) */
+int ferrompi_alltoall_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Initialize persistent gatherv (generic, variable-count) */
+int ferrompi_gatherv_init(const void* sendbuf, int64_t sendcount, void* recvbuf, const int32_t* recvcounts, const int32_t* displs, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent scatterv (generic, variable-count) */
+int ferrompi_scatterv_init(const void* sendbuf, const int32_t* sendcounts, const int32_t* displs, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-gatherv (generic, variable-count) */
+int ferrompi_allgatherv_init(const void* sendbuf, int64_t sendcount, void* recvbuf, const int32_t* recvcounts, const int32_t* displs, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Initialize persistent all-to-allv (generic, variable-count) */
+int ferrompi_alltoallv_init(const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls, void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls, int32_t datatype_tag, int32_t comm, int64_t* request);
+
+/** Initialize persistent reduce-scatter with uniform block size (generic) */
+int ferrompi_reduce_scatter_block_init(const void* sendbuf, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
 
 /* ============================================================
  * Info Object Operations

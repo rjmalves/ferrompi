@@ -325,6 +325,138 @@ extern "C" {
         request: *mut int64_t,
     ) -> c_int;
 
+    pub fn ferrompi_ireduce(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_igather(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iallgather(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iscatter(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_ibarrier(comm: int32_t, request: *mut int64_t) -> c_int;
+
+    pub fn ferrompi_iscan(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iexscan(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_ialltoall(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_igatherv(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iscatterv(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        displs: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_iallgatherv(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_ialltoallv(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        sdispls: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        rdispls: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_ireduce_scatter_block(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
     // ============================================================
     // Generic Persistent Collectives (MPI 4.0+)
     // ============================================================
@@ -364,6 +496,125 @@ extern "C" {
         recvcount: int64_t,
         datatype_tag: int32_t,
         root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_reduce_init(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_scatter_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_allgather_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_scan_init(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_exscan_init(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_alltoall_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_gatherv_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_scatterv_init(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        displs: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        root: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_allgatherv_init(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        displs: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_alltoallv_init(
+        sendbuf: *const c_void,
+        sendcounts: *const int32_t,
+        sdispls: *const int32_t,
+        recvbuf: *mut c_void,
+        recvcounts: *const int32_t,
+        rdispls: *const int32_t,
+        datatype_tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_reduce_scatter_block_init(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
         comm: int32_t,
         request: *mut int64_t,
     ) -> c_int;

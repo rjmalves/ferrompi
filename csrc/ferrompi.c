@@ -1031,6 +1031,430 @@ int ferrompi_iallreduce(
     return ret;
 }
 
+int ferrompi_ireduce(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        ret = MPI_Ireduce_c(sendbuf, recvbuf, (MPI_Count)count, dt, mpi_op, root, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Ireduce(sendbuf, recvbuf, (int)count, dt, mpi_op, root, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_igather(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        ret = MPI_Igather_c(sendbuf, (MPI_Count)sendcount, dt,
+                            recvbuf, (MPI_Count)recvcount, dt,
+                            root, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Igather(sendbuf, (int)sendcount, dt,
+                          recvbuf, (int)recvcount, dt,
+                          root, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iallgather(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        ret = MPI_Iallgather_c(sendbuf, (MPI_Count)sendcount, dt,
+                                recvbuf, (MPI_Count)recvcount, dt,
+                                comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Iallgather(sendbuf, (int)sendcount, dt,
+                             recvbuf, (int)recvcount, dt,
+                             comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iscatter(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        ret = MPI_Iscatter_c(sendbuf, (MPI_Count)sendcount, dt,
+                             recvbuf, (MPI_Count)recvcount, dt,
+                             root, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Iscatter(sendbuf, (int)sendcount, dt,
+                           recvbuf, (int)recvcount, dt,
+                           root, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_ibarrier(
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Request req;
+    int ret = MPI_Ibarrier(comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iscan(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        ret = MPI_Iscan_c(sendbuf, recvbuf, (MPI_Count)count, dt, mpi_op, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Iscan(sendbuf, recvbuf, (int)count, dt, mpi_op, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iexscan(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        ret = MPI_Iexscan_c(sendbuf, recvbuf, (MPI_Count)count, dt, mpi_op, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Iexscan(sendbuf, recvbuf, (int)count, dt, mpi_op, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_ialltoall(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        ret = MPI_Ialltoall_c(sendbuf, (MPI_Count)sendcount, dt,
+                               recvbuf, (MPI_Count)recvcount, dt, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Ialltoall(sendbuf, (int)sendcount, dt,
+                            recvbuf, (int)recvcount, dt, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_igatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t root, int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    int ret = MPI_Igatherv(sendbuf, (int)sendcount, dt,
+                           recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                           root, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iscatterv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* displs,
+    void* recvbuf, int64_t recvcount,
+    int32_t datatype_tag, int32_t root, int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    int ret = MPI_Iscatterv(sendbuf, (const int*)sendcounts, (const int*)displs, dt,
+                            recvbuf, (int)recvcount, dt,
+                            root, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_iallgatherv(
+    const void* sendbuf, int64_t sendcount,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
+    int32_t datatype_tag, int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    int ret = MPI_Iallgatherv(sendbuf, (int)sendcount, dt,
+                              recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                              comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_ialltoallv(
+    const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls,
+    void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls,
+    int32_t datatype_tag, int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    /* Cast int32_t* to int* — safe since int is at least 32 bits on all MPI platforms */
+    int ret = MPI_Ialltoallv(sendbuf, (const int*)sendcounts, (const int*)sdispls, dt,
+                             recvbuf, (const int*)recvcounts, (const int*)rdispls, dt,
+                             comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_ireduce_scatter_block(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+    int ret;
+
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        ret = MPI_Ireduce_scatter_block_c(sendbuf, recvbuf, (MPI_Count)recvcount, dt, mpi_op, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Ireduce_scatter_block(sendbuf, recvbuf, (int)recvcount, dt, mpi_op, comm, &req);
+    }
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
 /* ============================================================
  * Generic Persistent Collectives (MPI 4.0+)
  * ============================================================ */
@@ -1150,6 +1574,334 @@ int ferrompi_gather_init(
     return ret;
 }
 
+int ferrompi_reduce_init(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+
+    int ret = MPI_Reduce_init(sendbuf, recvbuf, (int)count, dt, mpi_op, root, comm,
+                              MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_scatter_init(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Scatter_init(sendbuf, (int)sendcount, dt,
+                               recvbuf, (int)recvcount, dt,
+                               root, comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_allgather_init(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Allgather_init(sendbuf, (int)sendcount, dt,
+                                 recvbuf, (int)recvcount, dt,
+                                 comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_scan_init(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+
+    int ret = MPI_Scan_init(sendbuf, recvbuf, (int)count, dt, mpi_op, comm,
+                            MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_exscan_init(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+
+    int ret = MPI_Exscan_init(sendbuf, recvbuf, (int)count, dt, mpi_op, comm,
+                              MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_alltoall_init(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Alltoall_init(sendbuf, (int)sendcount, dt,
+                                recvbuf, (int)recvcount, dt,
+                                comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_gatherv_init(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    const int32_t* recvcounts,
+    const int32_t* displs,
+    int32_t datatype_tag,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Gatherv_init(sendbuf, (int)sendcount, dt,
+                               recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                               root, comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_scatterv_init(
+    const void* sendbuf,
+    const int32_t* sendcounts,
+    const int32_t* displs,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t root,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Scatterv_init(sendbuf, (const int*)sendcounts, (const int*)displs, dt,
+                                recvbuf, (int)recvcount, dt,
+                                root, comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_allgatherv_init(
+    const void* sendbuf,
+    int64_t sendcount,
+    void* recvbuf,
+    const int32_t* recvcounts,
+    const int32_t* displs,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Allgatherv_init(sendbuf, (int)sendcount, dt,
+                                  recvbuf, (const int*)recvcounts, (const int*)displs, dt,
+                                  comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_alltoallv_init(
+    const void* sendbuf,
+    const int32_t* sendcounts,
+    const int32_t* sdispls,
+    void* recvbuf,
+    const int32_t* recvcounts,
+    const int32_t* rdispls,
+    int32_t datatype_tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Alltoallv_init(sendbuf, (const int*)sendcounts, (const int*)sdispls, dt,
+                                 recvbuf, (const int*)recvcounts, (const int*)rdispls, dt,
+                                 comm, MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_reduce_scatter_block_init(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+    MPI_Request req;
+
+    int ret = MPI_Reduce_scatter_block_init(sendbuf, recvbuf, (int)recvcount, dt, mpi_op, comm,
+                                            MPI_INFO_NULL, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
 #else /* MPI_VERSION < 4 */
 
 int ferrompi_bcast_init(void* buf, int64_t count, int32_t datatype_tag, int32_t root,
@@ -1174,6 +1926,88 @@ int ferrompi_gather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, 
                          int32_t datatype_tag, int32_t root, int32_t comm_handle, int64_t* request_handle) {
     (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcount;
     (void)datatype_tag; (void)root; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_reduce_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag,
+                         int32_t op, int32_t root, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)recvbuf; (void)count; (void)datatype_tag;
+    (void)op; (void)root; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_scatter_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount,
+                          int32_t datatype_tag, int32_t root, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcount;
+    (void)datatype_tag; (void)root; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_allgather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount,
+                            int32_t datatype_tag, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcount;
+    (void)datatype_tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_scan_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag,
+                       int32_t op, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)recvbuf; (void)count; (void)datatype_tag;
+    (void)op; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_exscan_init(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag,
+                         int32_t op, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)recvbuf; (void)count; (void)datatype_tag;
+    (void)op; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_alltoall_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount,
+                           int32_t datatype_tag, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcount;
+    (void)datatype_tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_gatherv_init(const void* sendbuf, int64_t sendcount, void* recvbuf,
+                          const int32_t* recvcounts, const int32_t* displs,
+                          int32_t datatype_tag, int32_t root, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcounts; (void)displs;
+    (void)datatype_tag; (void)root; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_scatterv_init(const void* sendbuf, const int32_t* sendcounts, const int32_t* displs,
+                           void* recvbuf, int64_t recvcount,
+                           int32_t datatype_tag, int32_t root, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcounts; (void)displs; (void)recvbuf; (void)recvcount;
+    (void)datatype_tag; (void)root; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_allgatherv_init(const void* sendbuf, int64_t sendcount, void* recvbuf,
+                             const int32_t* recvcounts, const int32_t* displs,
+                             int32_t datatype_tag, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcount; (void)recvbuf; (void)recvcounts; (void)displs;
+    (void)datatype_tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_alltoallv_init(const void* sendbuf, const int32_t* sendcounts, const int32_t* sdispls,
+                            void* recvbuf, const int32_t* recvcounts, const int32_t* rdispls,
+                            int32_t datatype_tag, int32_t comm_handle, int64_t* request_handle) {
+    (void)sendbuf; (void)sendcounts; (void)sdispls; (void)recvbuf; (void)recvcounts; (void)rdispls;
+    (void)datatype_tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_reduce_scatter_block_init(const void* sendbuf, void* recvbuf, int64_t recvcount,
+                                       int32_t datatype_tag, int32_t op, int32_t comm_handle,
+                                       int64_t* request_handle) {
+    (void)sendbuf; (void)recvbuf; (void)recvcount; (void)datatype_tag;
+    (void)op; (void)comm_handle; (void)request_handle;
     return MPI_ERR_OTHER;
 }
 

@@ -1435,6 +1435,612 @@ impl Communicator {
         Ok(Request::new(request_handle))
     }
 
+    /// Nonblocking reduce to root.
+    ///
+    /// Initiates a reduction operation and returns immediately with a [`Request`]
+    /// handle. The buffers must remain valid until the request is completed.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for result (only significant at root)
+    /// * `op` - Reduction operation
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let req = world.ireduce(&send, &mut recv, ReduceOp::Sum, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ireduce<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+        root: i32,
+    ) -> Result<Request> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_ireduce(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking gather to root.
+    ///
+    /// Initiates a gather operation and returns immediately with a [`Request`]
+    /// handle. Each process sends `send.len()` elements. Root receives
+    /// `send.len() * size` elements total.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for received data (only significant at root)
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![world.rank() as f64; 5];
+    /// let mut recv = vec![0.0f64; 5 * world.size() as usize];
+    /// let req = world.igather(&send, &mut recv, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn igather<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_igather(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking all-gather.
+    ///
+    /// Initiates an all-gather operation and returns immediately with a
+    /// [`Request`] handle. Each process sends `send.len()` elements and
+    /// receives from all.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![world.rank() as i32; 3];
+    /// let mut recv = vec![0i32; 3 * world.size() as usize];
+    /// let req = world.iallgather(&send, &mut recv).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iallgather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iallgather(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking scatter from root.
+    ///
+    /// Initiates a scatter operation and returns immediately with a [`Request`]
+    /// handle. Root sends `recv.len() * size` elements total, each process
+    /// receives `recv.len()` elements.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![0.0f64; 5 * world.size() as usize];
+    /// let mut recv = vec![0.0f64; 5];
+    /// let req = world.iscatter(&send, &mut recv, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iscatter<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iscatter(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking barrier.
+    ///
+    /// Initiates a barrier synchronization and returns immediately with a
+    /// [`Request`] handle. The barrier is complete when the request is waited on.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let req = world.ibarrier().unwrap();
+    /// // ... do other work ...
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ibarrier(&self) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe { ffi::ferrompi_ibarrier(self.handle, &mut request_handle) };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking inclusive prefix reduction (scan).
+    ///
+    /// Initiates an inclusive scan and returns immediately with a [`Request`]
+    /// handle. On rank `i`, `recv` will contain the reduction of `send` values
+    /// from ranks `0..=i` once the request completes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let req = world.iscan(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iscan<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<Request> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iscan(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking exclusive prefix reduction (exscan).
+    ///
+    /// Initiates an exclusive scan and returns immediately with a [`Request`]
+    /// handle. On rank `i`, `recv` will contain the reduction of `send` values
+    /// from ranks `0..i` once the request completes.
+    ///
+    /// # Rank 0 Behavior
+    ///
+    /// **Per the MPI standard, the contents of `recv` on rank 0 are undefined.**
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let req = world.iexscan(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iexscan<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<Request> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iexscan(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking all-to-all personalized communication.
+    ///
+    /// Initiates an all-to-all operation and returns immediately with a
+    /// [`Request`] handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()` or
+    /// `send.len()` is not evenly divisible by the communicator size.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![world.rank() as f64; size * 3];
+    /// let mut recv = vec![0.0f64; size * 3];
+    /// let req = world.ialltoall(&send, &mut recv).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ialltoall<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<Request> {
+        let size = self.size() as usize;
+        if send.len() != recv.len() || send.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let count = (send.len() / size) as i64;
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_ialltoall(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                count,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                count,
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking gather variable amounts of data to root.
+    ///
+    /// Initiates a variable-count gather and returns immediately with a
+    /// [`Request`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for received data (only significant at root)
+    /// * `recvcounts` - Number of elements received from each rank
+    /// * `displs` - Displacement in `recv` for data from each rank
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// let send = vec![rank as f64; (rank + 1) as usize];
+    /// let size = world.size();
+    /// let recvcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = recvcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = recvcounts.iter().sum();
+    /// let mut recv = vec![0.0f64; total as usize];
+    /// let req = world.igatherv(&send, &mut recv, &recvcounts, &displs, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn igatherv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+        root: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_igatherv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking scatter variable amounts of data from root.
+    ///
+    /// Initiates a variable-count scatter and returns immediately with a
+    /// [`Request`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to scatter (only significant at root)
+    /// * `recv` - Buffer for received data
+    /// * `sendcounts` - Number of elements sent to each rank
+    /// * `displs` - Displacement in `send` for data to each rank
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// let size = world.size();
+    /// let sendcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = sendcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = sendcounts.iter().sum();
+    /// let send = vec![0.0f64; total as usize];
+    /// let mut recv = vec![0.0f64; (rank + 1) as usize];
+    /// let req = world.iscatterv(&send, &mut recv, &sendcounts, &displs, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iscatterv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        sendcounts: &[i32],
+        displs: &[i32],
+        root: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iscatterv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                displs.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking all-gather variable amounts of data.
+    ///
+    /// Initiates a variable-count all-gather and returns immediately with a
+    /// [`Request`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to send from this process
+    /// * `recv` - Buffer for received data
+    /// * `recvcounts` - Number of elements received from each rank
+    /// * `displs` - Displacement in `recv` for data from each rank
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank();
+    /// let size = world.size();
+    /// let send = vec![rank as f64; (rank + 1) as usize];
+    /// let recvcounts: Vec<i32> = (0..size).map(|r| r + 1).collect();
+    /// let displs: Vec<i32> = recvcounts.iter()
+    ///     .scan(0, |acc, &c| { let d = *acc; *acc += c; Some(d) })
+    ///     .collect();
+    /// let total: i32 = recvcounts.iter().sum();
+    /// let mut recv = vec![0.0f64; total as usize];
+    /// let req = world.iallgatherv(&send, &mut recv, &recvcounts, &displs).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn iallgatherv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_iallgatherv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking all-to-all with variable counts.
+    ///
+    /// Initiates a variable-count all-to-all and returns immediately with a
+    /// [`Request`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer
+    /// * `sendcounts` - Number of elements to send to each rank
+    /// * `sdispls` - Send displacement for each rank
+    /// * `recvcounts` - Number of elements to receive from each rank
+    /// * `rdispls` - Receive displacement for each rank
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let sendcounts = vec![1i32; size];
+    /// let sdispls: Vec<i32> = (0..size as i32).collect();
+    /// let recvcounts = vec![1i32; size];
+    /// let rdispls: Vec<i32> = (0..size as i32).collect();
+    /// let send = vec![world.rank() as f64; size];
+    /// let mut recv = vec![0.0f64; size];
+    /// let req = world.ialltoallv(&send, &mut recv, &sendcounts, &sdispls, &recvcounts, &rdispls).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ialltoallv<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        sendcounts: &[i32],
+        sdispls: &[i32],
+        recvcounts: &[i32],
+        rdispls: &[i32],
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_ialltoallv(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                sdispls.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                rdispls.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking reduce-scatter with uniform block size.
+    ///
+    /// Initiates a reduce-scatter operation and returns immediately with a
+    /// [`Request`] handle. Performs an element-wise reduction across all
+    /// processes, then scatters the result so that each process receives
+    /// `recv.len()` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len() * size`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![1.0f64; size * 5];
+    /// let mut recv = vec![0.0f64; 5];
+    /// let req = world.ireduce_scatter_block(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn ireduce_scatter_block<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<Request> {
+        let size = self.size() as usize;
+        if send.len() != recv.len() * size {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_ireduce_scatter_block(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check(ret)?;
+        Ok(Request::new(request_handle))
+    }
+
     // ========================================================================
     // Generic Persistent Collectives (MPI 4.0+)
     // ========================================================================
@@ -1578,6 +2184,638 @@ impl Communicator {
                 send.len() as i64,
                 T::TAG as i32,
                 root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent reduce operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer (significant only at root)
+    /// * `op` - Reduction operation
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.reduce_init(&send, &mut recv, ReduceOp::Sum, 0).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn reduce_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+        root: i32,
+    ) -> Result<PersistentRequest> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_reduce_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent scatter operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer (significant only at root)
+    /// * `recv` - Receive buffer
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![0.0f64; 40]; // 4 ranks × 10 elements
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.scatter_init(&send, &mut recv, 0).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn scatter_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_scatter_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent all-gather operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer (each rank sends `send.len()` elements)
+    /// * `recv` - Receive buffer (must hold `send.len() * size` elements)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 40]; // 4 ranks × 10
+    /// let mut persistent = world.allgather_init(&send, &mut recv).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn allgather_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_allgather_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent scan (inclusive prefix reduction) operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer
+    /// * `op` - Reduction operation
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.scan_init(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn scan_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<PersistentRequest> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_scan_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent exclusive scan (exclusive prefix reduction) operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer (undefined on rank 0 after operation)
+    /// * `op` - Reduction operation
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.exscan_init(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn exscan_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<PersistentRequest> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_exscan_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent all-to-all operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer (must contain `sendcount * size` elements)
+    /// * `recv` - Receive buffer (must contain `recvcount * size` elements)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![1.0f64; 10 * size];
+    /// let mut recv = vec![0.0f64; 10 * size];
+    /// let mut persistent = world.alltoall_init(&send, &mut recv).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn alltoall_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+    ) -> Result<PersistentRequest> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let size = self.size() as usize;
+        if size == 0 || send.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let count_per_rank = send.len() / size;
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_alltoall_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                count_per_rank as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                count_per_rank as i64,
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent gatherv operation (variable-count gather).
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer (significant only at root)
+    /// * `recvcounts` - Number of elements to receive from each rank
+    /// * `displs` - Displacement for each rank in the receive buffer
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 40];
+    /// let recvcounts = vec![10i32; 4];
+    /// let displs = vec![0i32, 10, 20, 30];
+    /// let mut persistent = world.gatherv_init(&send, &mut recv, &recvcounts, &displs, 0).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn gatherv_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+        root: i32,
+    ) -> Result<PersistentRequest> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_gatherv_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent scatterv operation (variable-count scatter).
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer (significant only at root)
+    /// * `sendcounts` - Number of elements to send to each rank
+    /// * `displs` - Displacement for each rank in the send buffer
+    /// * `recv` - Receive buffer
+    /// * `root` - Rank of the root process
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 40];
+    /// let sendcounts = vec![10i32; 4];
+    /// let displs = vec![0i32, 10, 20, 30];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.scatterv_init(&send, &sendcounts, &displs, &mut recv, 0).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn scatterv_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        sendcounts: &[i32],
+        displs: &[i32],
+        recv: &mut [T],
+        root: i32,
+    ) -> Result<PersistentRequest> {
+        if sendcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_scatterv_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                displs.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                root,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent all-gatherv operation (variable-count all-gather).
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `recv` - Receive buffer
+    /// * `recvcounts` - Number of elements to receive from each rank
+    /// * `displs` - Displacement for each rank in the receive buffer
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 40];
+    /// let recvcounts = vec![10i32; 4];
+    /// let displs = vec![0i32, 10, 20, 30];
+    /// let mut persistent = world.allgatherv_init(&send, &mut recv, &recvcounts, &displs).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn allgatherv_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        displs: &[i32],
+    ) -> Result<PersistentRequest> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_allgatherv_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                displs.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent all-to-allv operation (variable-count all-to-all).
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer
+    /// * `sendcounts` - Number of elements to send to each rank
+    /// * `sdispls` - Send displacement for each rank
+    /// * `recv` - Receive buffer
+    /// * `recvcounts` - Number of elements to receive from each rank
+    /// * `rdispls` - Receive displacement for each rank
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 40];
+    /// let sendcounts = vec![10i32; 4];
+    /// let sdispls = vec![0i32, 10, 20, 30];
+    /// let mut recv = vec![0.0f64; 40];
+    /// let recvcounts = vec![10i32; 4];
+    /// let rdispls = vec![0i32, 10, 20, 30];
+    /// let mut persistent = world.alltoallv_init(
+    ///     &send, &sendcounts, &sdispls,
+    ///     &mut recv, &recvcounts, &rdispls,
+    /// ).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn alltoallv_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        sendcounts: &[i32],
+        sdispls: &[i32],
+        recv: &mut [T],
+        recvcounts: &[i32],
+        rdispls: &[i32],
+    ) -> Result<PersistentRequest> {
+        if sendcounts.len() != sdispls.len() || recvcounts.len() != rdispls.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_alltoallv_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                sendcounts.as_ptr(),
+                sdispls.as_ptr(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcounts.as_ptr(),
+                rdispls.as_ptr(),
+                T::TAG as i32,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        if ret != 0 {
+            return Err(Error::NotSupported(
+                "Persistent collectives require MPI 4.0+".into(),
+            ));
+        }
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent reduce-scatter-block operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Requires MPI 4.0+.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Send buffer (must contain `recvcount * size` elements)
+    /// * `recv` - Receive buffer
+    /// * `op` - Reduction operation
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let size = world.size() as usize;
+    /// let send = vec![1.0f64; 10 * size];
+    /// let mut recv = vec![0.0f64; 10];
+    /// let mut persistent = world.reduce_scatter_block_init(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// for _ in 0..100 {
+    ///     persistent.start().unwrap();
+    ///     persistent.wait().unwrap();
+    /// }
+    /// ```
+    pub fn reduce_scatter_block_init<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<PersistentRequest> {
+        let size = self.size() as usize;
+        if size == 0 || send.len() != recv.len() * size {
+            return Err(Error::InvalidBuffer);
+        }
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_reduce_scatter_block_init(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recv.len() as i64,
+                T::TAG as i32,
+                op as i32,
                 self.handle,
                 &mut request_handle,
             )
