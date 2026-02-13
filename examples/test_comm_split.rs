@@ -14,13 +14,6 @@ fn main() {
     let rank = world.rank();
     let size = world.size();
 
-    // Diagnostic output for CI debugging (MPICH 4.2.0 investigation)
-    eprintln!(
-        "[DIAG] test_comm_split: rank={rank}, size={size}, handle={}, pid={}",
-        world.raw_handle(),
-        std::process::id()
-    );
-
     assert!(
         size >= 4,
         "test_comm_split requires at least 4 processes, got {size}"
