@@ -85,6 +85,40 @@
 //! [`Mpi`] itself is `!Send + !Sync` — MPI initialization and finalization
 //! must occur on the same thread. Only [`Communicator`] handles (and the
 //! operations on them) may cross thread boundaries.
+//!
+//! ## Hybrid MPI+OpenMP
+//!
+//! For hybrid parallelism, use [`Mpi::init_thread()`] with the appropriate level:
+//!
+//! - **[`Funneled`](ThreadLevel::Funneled)** (recommended): Only the main thread makes MPI calls.
+//!   OpenMP threads handle computation between MPI calls.
+//! - **[`Serialized`](ThreadLevel::Serialized)**: Any thread can make MPI calls, but only one at a time.
+//! - **[`Multiple`](ThreadLevel::Multiple)**: Full concurrent MPI from any thread (highest overhead).
+//!
+//! ```no_run
+//! use ferrompi::{Mpi, ThreadLevel, ReduceOp};
+//!
+//! let mpi = Mpi::init_thread(ThreadLevel::Funneled).unwrap();
+//! assert!(mpi.thread_level() >= ThreadLevel::Funneled);
+//!
+//! let world = mpi.world();
+//! // Worker threads compute locally, main thread calls MPI
+//! let local = 42.0_f64;
+//! let global = world.allreduce_scalar(local, ReduceOp::Sum).unwrap();
+//! ```
+//!
+//! ### SLURM Configuration
+//!
+//! ```bash
+//! #SBATCH --ntasks-per-node=4        # MPI ranks per node
+//! #SBATCH --cpus-per-task=8          # OpenMP threads per rank
+//! #SBATCH --bind-to core             # Pin MPI ranks
+//! export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+//! srun ./my_program
+//! ```
+//!
+//! Use the `slurm` module (with `numa` feature) to read these values at runtime.
+//! See `examples/hybrid_openmp.rs` for the full pattern.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
@@ -106,6 +140,8 @@ mod ffi;
 mod info;
 mod persistent;
 mod request;
+#[cfg(feature = "numa")]
+pub mod slurm;
 mod status;
 #[cfg(feature = "rma")]
 mod window;

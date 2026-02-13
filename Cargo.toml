@@ -39,6 +39,10 @@ name = "pi_monte_carlo"
 path = "examples/pi_monte_carlo.rs"
 
 [[example]]
+name = "hybrid_openmp"
+path = "examples/hybrid_openmp.rs"
+
+[[example]]
 name = "shared_memory"
 path = "examples/shared_memory.rs"
 required-features = ["rma"]
