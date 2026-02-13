@@ -9,13 +9,16 @@
 use ferrompi::Mpi;
 
 fn main() {
+    let mpi = Mpi::init().expect("MPI init failed");
+
     // Install a panic hook that aborts the process to prevent MPI deadlocks.
+    // NOTE: Must be installed AFTER Mpi::init() to avoid interfering with
+    // MPI runtime initialization on some implementations (e.g., MPICH 4.2.0).
     std::panic::set_hook(Box::new(|info| {
         eprintln!("PANIC: {info}");
         std::process::abort();
     }));
 
-    let mpi = Mpi::init().expect("MPI init failed");
     let world = mpi.world();
     let rank = world.rank();
     let size = world.size();

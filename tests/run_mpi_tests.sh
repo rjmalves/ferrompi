@@ -159,7 +159,7 @@ echo -e "${BOLD}═════════════════════�
 # Core test examples (always run)
 run_test test_collectives
 run_test test_nonblocking
-run_test test_comm_split
+run_test test_comm_split 4
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"
