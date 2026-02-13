@@ -210,6 +210,25 @@ extern "C" {
     ) -> c_int;
 
     // ============================================================
+    // Info Object Operations
+    // ============================================================
+
+    pub fn ferrompi_info_create(info_handle: *mut int32_t) -> c_int;
+    pub fn ferrompi_info_free(info_handle: int32_t) -> c_int;
+    pub fn ferrompi_info_set(
+        info_handle: int32_t,
+        key: *const c_char,
+        value: *const c_char,
+    ) -> c_int;
+    pub fn ferrompi_info_get(
+        info_handle: int32_t,
+        key: *const c_char,
+        value: *mut c_char,
+        valuelen: *mut int32_t,
+        flag: *mut int32_t,
+    ) -> c_int;
+
+    // ============================================================
     // Error Information
     // ============================================================
 

@@ -263,6 +263,44 @@ int ferrompi_allreduce_init_inplace(void* buf, int64_t count, int32_t datatype_t
 int ferrompi_gather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm, int64_t* request);
 
 /* ============================================================
+ * Info Object Operations
+ * ============================================================ */
+
+/**
+ * Create a new MPI_Info object
+ * @param info_handle Output: info handle
+ * @return MPI error code
+ */
+int ferrompi_info_create(int32_t* info_handle);
+
+/**
+ * Free an MPI_Info object
+ * @param info_handle Info handle to free (no-op if invalid or already freed)
+ * @return MPI error code
+ */
+int ferrompi_info_free(int32_t info_handle);
+
+/**
+ * Set a key-value pair on an MPI_Info object
+ * @param info_handle Info handle
+ * @param key Null-terminated key string
+ * @param value Null-terminated value string
+ * @return MPI error code
+ */
+int ferrompi_info_set(int32_t info_handle, const char* key, const char* value);
+
+/**
+ * Get a value by key from an MPI_Info object
+ * @param info_handle Info handle
+ * @param key Null-terminated key string
+ * @param value Output buffer for value string
+ * @param valuelen Input/output: buffer size on input, actual length on output
+ * @param flag Output: 1 if key was found, 0 otherwise
+ * @return MPI error code
+ */
+int ferrompi_info_get(int32_t info_handle, const char* key, char* value, int32_t* valuelen, int32_t* flag);
+
+/* ============================================================
  * Error Information
  * ============================================================ */
 

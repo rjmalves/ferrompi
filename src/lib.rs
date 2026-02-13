@@ -76,12 +76,14 @@ mod comm;
 mod datatype;
 mod error;
 mod ffi;
+mod info;
 mod persistent;
 mod request;
 
 pub use comm::{Communicator, SplitType};
 pub use datatype::{DatatypeTag, MpiDatatype};
 pub use error::{Error, MpiErrorClass, Result};
+pub use info::Info;
 pub use persistent::PersistentRequest;
 pub use request::Request;
 

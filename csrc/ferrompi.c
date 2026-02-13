@@ -24,6 +24,9 @@
 // Split type constants (must match Rust SplitType enum and header defines)
 #define FERROMPI_COMM_TYPE_SHARED 0
 
+// Maximum number of concurrent MPI_Info objects
+#define MAX_INFOS 64
+
 // Maximum number of concurrent RMA windows
 #define MAX_WINDOWS 256
 
@@ -40,6 +43,11 @@ static int next_request_hint = 0;
 static MPI_Win win_table[MAX_WINDOWS];
 static int win_used[MAX_WINDOWS];  // 1 if slot is in use
 static int next_win_hint = 0;
+
+// Info table
+static MPI_Info info_table[MAX_INFOS];
+static int info_used[MAX_INFOS];  // 1 if slot is in use
+static int next_info_hint = 0;
 
 // Initialize tables
 static int tables_initialized = 0;
@@ -59,6 +67,10 @@ static void init_tables(void) {
     for (int i = 0; i < MAX_WINDOWS; i++) {
         win_table[i] = MPI_WIN_NULL;
         win_used[i] = 0;
+    }
+    for (int i = 0; i < MAX_INFOS; i++) {
+        info_table[i] = MPI_INFO_NULL;
+        info_used[i] = 0;
     }
     tables_initialized = 1;
 }
@@ -156,6 +168,36 @@ static void free_win(int32_t handle) {
     }
 }
 
+// Allocate an info handle
+static int32_t alloc_info(MPI_Info info) {
+    for (int i = 0; i < MAX_INFOS; i++) {
+        int idx = (next_info_hint + i) % MAX_INFOS;
+        if (!info_used[idx]) {
+            info_table[idx] = info;
+            info_used[idx] = 1;
+            next_info_hint = (idx + 1) % MAX_INFOS;
+            return (int32_t)idx;
+        }
+    }
+    return -1;  // No space
+}
+
+// Get MPI_Info from handle
+static MPI_Info get_info(int32_t handle) {
+    if (handle < 0 || handle >= MAX_INFOS || !info_used[handle]) {
+        return MPI_INFO_NULL;
+    }
+    return info_table[handle];
+}
+
+// Free an info handle
+static void free_info(int32_t handle) {
+    if (handle >= 0 && handle < MAX_INFOS) {
+        info_table[handle] = MPI_INFO_NULL;
+        info_used[handle] = 0;
+    }
+}
+
 // Map operation code to MPI_Op
 static MPI_Op get_op(int32_t op) {
     switch (op) {
@@ -230,6 +272,14 @@ int ferrompi_init(void) {
 }
 
 int ferrompi_finalize(void) {
+    // Clean up any remaining info objects (before windows and comms)
+    for (int i = 0; i < MAX_INFOS; i++) {
+        if (info_used[i] && info_table[i] != MPI_INFO_NULL) {
+            MPI_Info_free(&info_table[i]);
+        }
+        info_used[i] = 0;
+    }
+    
     // Clean up any remaining windows (before communicators, since windows reference comms)
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (win_used[i] && win_table[i] != MPI_WIN_NULL) {
@@ -798,6 +848,58 @@ int ferrompi_gather_init(const void* sendbuf, int64_t sendcount, void* recvbuf, 
 }
 
 #endif /* MPI_VERSION >= 4 */
+
+/* ============================================================
+ * Info Object Operations
+ * ============================================================ */
+
+int ferrompi_info_create(int32_t* info_handle) {
+    MPI_Info info;
+    int ret = MPI_Info_create(&info);
+    if (ret == MPI_SUCCESS) {
+        *info_handle = alloc_info(info);
+        if (*info_handle < 0) {
+            MPI_Info_free(&info);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_info_free(int32_t info_handle) {
+    if (info_handle < 0 || info_handle >= MAX_INFOS || !info_used[info_handle]) {
+        return MPI_SUCCESS;
+    }
+    int ret = MPI_Info_free(&info_table[info_handle]);
+    free_info(info_handle);
+    return ret;
+}
+
+int ferrompi_info_set(int32_t info_handle, const char* key, const char* value) {
+    MPI_Info info = get_info(info_handle);
+    if (info == MPI_INFO_NULL) return MPI_ERR_INFO;
+    return MPI_Info_set(info, key, value);
+}
+
+int ferrompi_info_get(int32_t info_handle, const char* key, char* value, int32_t* valuelen, int32_t* flag) {
+    MPI_Info info = get_info(info_handle);
+    if (info == MPI_INFO_NULL) return MPI_ERR_INFO;
+    int f;
+#if MPI_VERSION >= 4
+    int ret = MPI_Info_get_string(info, key, valuelen, value, &f);
+#else
+    /* MPI 3.x fallback: MPI_Info_get uses (info, key, valuelen, value, &flag) */
+    /* where valuelen is input max length, value is output buffer */
+    int vlen = *valuelen - 1;  /* MPI_Info_get expects max value length excluding null */
+    if (vlen < 0) vlen = 0;
+    int ret = MPI_Info_get(info, key, vlen, value, &f);
+    if (f) {
+        *valuelen = (int32_t)strlen(value);
+    }
+#endif
+    *flag = f;
+    return ret;
+}
 
 /* ============================================================
  * Error Information
