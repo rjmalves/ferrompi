@@ -211,6 +211,87 @@ int ferrompi_recv(
     int64_t* actual_count
 );
 
+/**
+ * Nonblocking send (generic)
+ * @param buf Data buffer (must remain valid until request completes)
+ * @param count Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param dest Destination rank
+ * @param tag Message tag
+ * @param comm Communicator handle
+ * @param request Output: request handle
+ * @return MPI error code
+ */
+int ferrompi_isend(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm,
+    int64_t* request
+);
+
+/**
+ * Nonblocking receive (generic)
+ * @param buf Receive buffer (must remain valid until request completes)
+ * @param count Maximum number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param source Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm Communicator handle
+ * @param request Output: request handle
+ * @return MPI error code
+ */
+int ferrompi_irecv(
+    void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t source,
+    int32_t tag,
+    int32_t comm,
+    int64_t* request
+);
+
+/**
+ * Blocking send-receive (generic)
+ *
+ * Sends data to one process and receives from another (or the same)
+ * in a single operation, avoiding deadlocks.
+ *
+ * @param sendbuf Data buffer to send
+ * @param sendcount Number of elements to send
+ * @param send_datatype_tag Send datatype tag
+ * @param dest Destination rank
+ * @param sendtag Send message tag
+ * @param recvbuf Receive buffer
+ * @param recvcount Maximum number of elements to receive
+ * @param recv_datatype_tag Receive datatype tag
+ * @param source Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param recvtag Receive message tag (or -1 for MPI_ANY_TAG)
+ * @param comm Communicator handle
+ * @param actual_source Output: actual source rank
+ * @param actual_tag Output: actual tag
+ * @param actual_count Output: actual count received
+ * @return MPI error code
+ */
+int ferrompi_sendrecv(
+    const void* sendbuf,
+    int64_t sendcount,
+    int32_t send_datatype_tag,
+    int32_t dest,
+    int32_t sendtag,
+    void* recvbuf,
+    int64_t recvcount,
+    int32_t recv_datatype_tag,
+    int32_t source,
+    int32_t recvtag,
+    int32_t comm,
+    int32_t* actual_source,
+    int32_t* actual_tag,
+    int64_t* actual_count
+);
+
 /* ============================================================
  * Generic Collective Operations - Blocking
  * ============================================================ */

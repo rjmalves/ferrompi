@@ -75,6 +75,43 @@ extern "C" {
         actual_count: *mut int64_t,
     ) -> c_int;
 
+    pub fn ferrompi_isend(
+        buf: *const c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        dest: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_irecv(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        source: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_sendrecv(
+        sendbuf: *const c_void,
+        sendcount: int64_t,
+        send_datatype_tag: int32_t,
+        dest: int32_t,
+        sendtag: int32_t,
+        recvbuf: *mut c_void,
+        recvcount: int64_t,
+        recv_datatype_tag: int32_t,
+        source: int32_t,
+        recvtag: int32_t,
+        comm: int32_t,
+        actual_source: *mut int32_t,
+        actual_tag: *mut int32_t,
+        actual_count: *mut int64_t,
+    ) -> c_int;
+
     // ============================================================
     // Generic Collective Operations - Blocking
     // ============================================================
