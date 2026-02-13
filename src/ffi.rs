@@ -37,6 +37,12 @@ extern "C" {
         key: int32_t,
         newcomm: *mut int32_t,
     ) -> c_int;
+    pub fn ferrompi_comm_split_type(
+        comm: int32_t,
+        split_type: int32_t,
+        key: int32_t,
+        newcomm: *mut int32_t,
+    ) -> c_int;
 
     // ============================================================
     // Synchronization

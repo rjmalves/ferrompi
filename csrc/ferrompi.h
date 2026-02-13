@@ -38,6 +38,15 @@ extern "C" {
 #define FERROMPI_U64  6
 
 /* ============================================================
+ * Communicator Split Type Constants
+ * ============================================================
+ * These constants map to MPI split type values in the C layer.
+ * They must match the Rust SplitType enum discriminants.
+ */
+
+#define FERROMPI_COMM_TYPE_SHARED 0
+
+/* ============================================================
  * Initialization and Finalization
  * ============================================================ */
 
@@ -128,6 +137,20 @@ int ferrompi_comm_free(int32_t comm);
  * @return MPI error code
  */
 int ferrompi_comm_split(int32_t comm, int32_t color, int32_t key, int32_t* newcomm);
+
+/**
+ * Split a communicator by type (e.g., shared memory).
+ * Processes that share the same resource (e.g., same physical node for
+ * FERROMPI_COMM_TYPE_SHARED) are placed in the same new communicator.
+ * The key controls rank ordering within the new communicator.
+ * If the split produces MPI_COMM_NULL for this process, newcomm is set to -1.
+ * @param comm Source communicator handle
+ * @param split_type Split type constant (FERROMPI_COMM_TYPE_SHARED)
+ * @param key Key value (rank ordering control)
+ * @param newcomm Output: new communicator handle (-1 if MPI_COMM_NULL)
+ * @return MPI error code
+ */
+int ferrompi_comm_split_type(int32_t comm, int32_t split_type, int32_t key, int32_t* newcomm);
 
 /* ============================================================
  * Synchronization

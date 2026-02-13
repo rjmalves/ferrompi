@@ -21,6 +21,9 @@
 // Maximum number of concurrent requests
 #define MAX_REQUESTS 16384
 
+// Split type constants (must match Rust SplitType enum and header defines)
+#define FERROMPI_COMM_TYPE_SHARED 0
+
 // Maximum number of concurrent RMA windows
 #define MAX_WINDOWS 256
 
@@ -324,6 +327,32 @@ int ferrompi_comm_split(int32_t comm_handle, int32_t color, int32_t key, int32_t
     if (ret == MPI_SUCCESS) {
         if (newcomm == MPI_COMM_NULL) {
             *newcomm_handle = -1;  // Process opted out
+        } else {
+            *newcomm_handle = alloc_comm(newcomm);
+            if (*newcomm_handle < 0) {
+                MPI_Comm_free(&newcomm);
+                return MPI_ERR_OTHER;
+            }
+        }
+    }
+    return ret;
+}
+
+int ferrompi_comm_split_type(int32_t comm_handle, int32_t split_type, int32_t key, int32_t* newcomm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    int mpi_split_type;
+    switch (split_type) {
+        case FERROMPI_COMM_TYPE_SHARED:
+            mpi_split_type = MPI_COMM_TYPE_SHARED;
+            break;
+        default:
+            return MPI_ERR_ARG;
+    }
+    MPI_Comm newcomm;
+    int ret = MPI_Comm_split_type(comm, mpi_split_type, key, MPI_INFO_NULL, &newcomm);
+    if (ret == MPI_SUCCESS) {
+        if (newcomm == MPI_COMM_NULL) {
+            *newcomm_handle = -1;
         } else {
             *newcomm_handle = alloc_comm(newcomm);
             if (*newcomm_handle < 0) {

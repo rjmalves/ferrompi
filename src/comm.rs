@@ -11,6 +11,18 @@ use crate::request::Request;
 use crate::ReduceOp;
 use std::marker::PhantomData;
 
+/// Split types for [`Communicator::split_type`].
+///
+/// These constants map to MPI communicator split type values. Currently only
+/// shared-memory splits are supported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum SplitType {
+    /// Split by shared memory domain (same physical node).
+    /// Maps to `MPI_COMM_TYPE_SHARED`.
+    Shared = 0,
+}
+
 /// An MPI communicator.
 ///
 /// This type wraps an MPI communicator handle and provides safe methods for
@@ -122,6 +134,66 @@ impl Communicator {
                 _marker: PhantomData,
             }))
         }
+    }
+
+    /// Split this communicator by type.
+    ///
+    /// Processes that share the same resource (determined by `split_type`) are
+    /// placed in the same new communicator. The `key` controls the rank ordering
+    /// within the new communicator.
+    ///
+    /// Returns `None` if MPI returns `MPI_COMM_NULL` for this process.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::{Mpi, SplitType};
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// if let Some(node) = world.split_type(SplitType::Shared, world.rank()).unwrap() {
+    ///     println!("Node has {} processes", node.size());
+    /// }
+    /// ```
+    pub fn split_type(&self, split_type: SplitType, key: i32) -> Result<Option<Communicator>> {
+        let mut new_handle: i32 = 0;
+        let ret = unsafe {
+            ffi::ferrompi_comm_split_type(self.handle, split_type as i32, key, &mut new_handle)
+        };
+        Error::check(ret)?;
+        if new_handle < 0 {
+            Ok(None)
+        } else {
+            Ok(Some(Communicator {
+                handle: new_handle,
+                _marker: PhantomData,
+            }))
+        }
+    }
+
+    /// Create a communicator containing only processes that share memory.
+    ///
+    /// This is equivalent to `split_type(SplitType::Shared, self.rank())`.
+    /// All processes on the same physical node will be in the same communicator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Internal`] if MPI unexpectedly returns a null communicator,
+    /// which should not happen for `MPI_COMM_TYPE_SHARED` under normal conditions.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let node = world.split_shared().unwrap();
+    /// println!("Node has {} processes, I am local rank {}", node.size(), node.rank());
+    /// ```
+    pub fn split_shared(&self) -> Result<Communicator> {
+        self.split_type(SplitType::Shared, self.rank())?
+            .ok_or_else(|| Error::Internal("split_shared returned null communicator".into()))
     }
 
     // ========================================================================

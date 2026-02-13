@@ -79,7 +79,7 @@ mod ffi;
 mod persistent;
 mod request;
 
-pub use comm::Communicator;
+pub use comm::{Communicator, SplitType};
 pub use datatype::{DatatypeTag, MpiDatatype};
 pub use error::{Error, MpiErrorClass, Result};
 pub use persistent::PersistentRequest;
