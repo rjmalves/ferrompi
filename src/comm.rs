@@ -598,6 +598,148 @@ impl Communicator {
         Ok(recv[0])
     }
 
+    /// Inclusive prefix reduction (scan).
+    ///
+    /// On rank `i`, `recv` contains the reduction of `send` values from ranks
+    /// `0..=i`. This is the inclusive variant: every rank's own contribution is
+    /// included in its result.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to contribute from this process
+    /// * `recv` - Buffer for the prefix-reduced result (must be same length as `send`)
+    /// * `op` - Reduction operation
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// world.scan(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// // On rank i, recv[j] == (i + 1) * send[j]
+    /// ```
+    pub fn scan<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], op: ReduceOp) -> Result<()> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            ffi::ferrompi_scan(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Exclusive prefix reduction (exscan).
+    ///
+    /// On rank `i`, `recv` contains the reduction of `send` values from ranks
+    /// `0..i` (i.e., excluding rank `i`'s own contribution).
+    ///
+    /// # Rank 0 Behavior
+    ///
+    /// **Per the MPI standard, the contents of `recv` on rank 0 are undefined.**
+    /// Callers must not rely on the receive buffer contents on rank 0.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data to contribute from this process
+    /// * `recv` - Buffer for the prefix-reduced result (must be same length as `send`;
+    ///   **undefined on rank 0**)
+    /// * `op` - Reduction operation
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidBuffer`] if `send.len() != recv.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 10];
+    /// let mut recv = vec![0.0f64; 10];
+    /// world.exscan(&send, &mut recv, ReduceOp::Sum).unwrap();
+    /// // On rank i > 0, recv[j] == i * send[j]
+    /// // On rank 0, recv is undefined per the MPI standard.
+    /// ```
+    pub fn exscan<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], op: ReduceOp) -> Result<()> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            ffi::ferrompi_exscan(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Inclusive scan of a single scalar value.
+    ///
+    /// Convenience method for scanning a single element. On rank `i`, returns
+    /// the reduction of the input values from ranks `0..=i`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let prefix_sum = world.scan_scalar(1.0f64, ReduceOp::Sum).unwrap();
+    /// // On rank i, prefix_sum == (i + 1) as f64
+    /// ```
+    pub fn scan_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp) -> Result<T> {
+        let send = [value];
+        let mut recv = [value]; // placeholder, will be overwritten
+        self.scan(&send, &mut recv, op)?;
+        Ok(recv[0])
+    }
+
+    /// Exclusive scan of a single scalar value.
+    ///
+    /// Convenience method for exclusive-scanning a single element. On rank `i`,
+    /// returns the reduction of input values from ranks `0..i`.
+    ///
+    /// # Rank 0 Behavior
+    ///
+    /// **Per the MPI standard, the return value on rank 0 is undefined.**
+    /// Callers must not rely on the result on rank 0.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{Mpi, ReduceOp};
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let prefix_sum = world.exscan_scalar(1.0f64, ReduceOp::Sum).unwrap();
+    /// // On rank i > 0, prefix_sum == i as f64
+    /// // On rank 0, the result is undefined per the MPI standard.
+    /// ```
+    pub fn exscan_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp) -> Result<T> {
+        let send = [value];
+        let mut recv = [value]; // placeholder, will be overwritten by MPI (except rank 0)
+        self.exscan(&send, &mut recv, op)?;
+        Ok(recv[0])
+    }
+
     /// Gather values to the root process.
     ///
     /// Each process sends `send.len()` elements. Root receives

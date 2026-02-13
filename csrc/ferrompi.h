@@ -308,6 +308,39 @@ int ferrompi_allreduce(const void* sendbuf, void* recvbuf, int64_t count, int32_
 /** In-place all-reduce (generic) */
 int ferrompi_allreduce_inplace(void* buf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
 
+/**
+ * Inclusive prefix reduction (scan).
+ *
+ * On rank i, recvbuf contains the reduction of sendbuf values from ranks 0..=i.
+ * Uses MPI_Scan_c for counts exceeding INT_MAX on MPI 4.0+.
+ *
+ * @param sendbuf Send buffer
+ * @param recvbuf Receive buffer (same size as sendbuf)
+ * @param count Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param op Reduction operation
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_scan(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
+
+/**
+ * Exclusive prefix reduction (exscan).
+ *
+ * On rank i, recvbuf contains the reduction of sendbuf values from ranks 0..i-1.
+ * The receive buffer on rank 0 is undefined per the MPI standard.
+ * Uses MPI_Exscan_c for counts exceeding INT_MAX on MPI 4.0+.
+ *
+ * @param sendbuf Send buffer
+ * @param recvbuf Receive buffer (same size as sendbuf; undefined on rank 0)
+ * @param count Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F32, FERROMPI_F64, etc.)
+ * @param op Reduction operation
+ * @param comm Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_exscan(const void* sendbuf, void* recvbuf, int64_t count, int32_t datatype_tag, int32_t op, int32_t comm);
+
 /** Gather (generic) */
 int ferrompi_gather(const void* sendbuf, int64_t sendcount, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t root, int32_t comm);
 

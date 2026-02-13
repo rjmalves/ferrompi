@@ -685,6 +685,46 @@ int ferrompi_allreduce_inplace(void* buf, int64_t count, int32_t datatype_tag, i
     return MPI_Allreduce(MPI_IN_PLACE, buf, (int)count, dt, mpi_op, comm);
 }
 
+int ferrompi_scan(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        return MPI_Scan_c(sendbuf, recvbuf, (MPI_Count)count, dt, mpi_op, comm);
+    }
+#endif
+    return MPI_Scan(sendbuf, recvbuf, (int)count, dt, mpi_op, comm);
+}
+
+int ferrompi_exscan(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op,
+    int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op);
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        return MPI_Exscan_c(sendbuf, recvbuf, (MPI_Count)count, dt, mpi_op, comm);
+    }
+#endif
+    return MPI_Exscan(sendbuf, recvbuf, (int)count, dt, mpi_op, comm);
+}
+
 int ferrompi_gather(
     const void* sendbuf,
     int64_t sendcount,

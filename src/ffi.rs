@@ -151,6 +151,24 @@ extern "C" {
         comm: int32_t,
     ) -> c_int;
 
+    pub fn ferrompi_scan(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_exscan(
+        sendbuf: *const c_void,
+        recvbuf: *mut c_void,
+        count: int64_t,
+        datatype_tag: int32_t,
+        op: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
     pub fn ferrompi_gather(
         sendbuf: *const c_void,
         sendcount: int64_t,
