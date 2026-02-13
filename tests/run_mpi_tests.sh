@@ -156,7 +156,40 @@ echo -e "${BOLD}═════════════════════�
 echo -e "${BOLD}Running integration tests${RESET}"
 echo -e "${BOLD}════════════════════════════════════════${RESET}"
 
-# Core test examples (always run)
+# Diagnostic: compare test binary vs example binary
+echo ""
+echo "=== CI DIAGNOSTIC: Binary comparison ==="
+echo "--- test_collectives ---"
+ls -la ./target/${BUILD_MODE}/examples/test_collectives 2>&1 || true
+file ./target/${BUILD_MODE}/examples/test_collectives 2>&1 || true
+echo "--- hello_world ---"
+ls -la ./target/${BUILD_MODE}/examples/hello_world 2>&1 || true
+file ./target/${BUILD_MODE}/examples/hello_world 2>&1 || true
+echo "--- ldd test_collectives ---"
+ldd ./target/${BUILD_MODE}/examples/test_collectives 2>&1 | grep -i mpi || true
+echo "--- ldd hello_world ---"
+ldd ./target/${BUILD_MODE}/examples/hello_world 2>&1 | grep -i mpi || true
+echo "--- readelf test_collectives (MPI symbols) ---"
+readelf -d ./target/${BUILD_MODE}/examples/test_collectives 2>&1 | grep -i "needed\|rpath\|runpath" || true
+echo "--- readelf hello_world (MPI symbols) ---"
+readelf -d ./target/${BUILD_MODE}/examples/hello_world 2>&1 | grep -i "needed\|rpath\|runpath" || true
+echo "--- md5sum ---"
+md5sum ./target/${BUILD_MODE}/examples/test_collectives ./target/${BUILD_MODE}/examples/hello_world 2>&1 || true
+echo "--- symlink check ---"
+readlink -f ./target/${BUILD_MODE}/examples/test_collectives 2>&1 || true
+readlink -f ./target/${BUILD_MODE}/examples/hello_world 2>&1 || true
+echo "--- mpiexec which ---"
+which mpiexec 2>&1 || true
+mpiexec --version 2>&1 || true
+echo "--- env PMI/HYDRA ---"
+env | grep -iE "(PMI|HYDRA|MPI)" 2>&1 || true
+echo "=== END DIAGNOSTIC ==="
+echo ""
+
+# Smoke tests first (to verify MPI works)
+run_test hello_world
+
+# Core test examples
 run_test test_collectives
 run_test test_nonblocking
 run_test test_comm_split 4
@@ -167,7 +200,6 @@ echo -e "${BOLD}Running existing examples as smoke tests${RESET}"
 echo -e "${BOLD}────────────────────────────────────────${RESET}"
 
 # Existing examples that serve as additional smoke tests
-run_test hello_world
 run_test ring
 run_test allreduce
 run_test nonblocking
