@@ -6,7 +6,7 @@ rust-version = "1.74"
 authors = ["Rogerio Alves"]
 description = "A safe, generic Rust wrapper for MPI with support for MPI 4.0+ features, shared memory windows, and hybrid MPI+OpenMP"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rjmalves/ferrompi"
+repository = "https://github.com/cobre-rs/ferrompi"
 keywords = ["mpi", "hpc", "parallel", "distributed"]
 categories = ["science", "concurrency"]
 

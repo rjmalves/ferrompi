@@ -5,7 +5,7 @@ Thank you for your interest in contributing to FerroMPI! This guide will help yo
 ## Quick Start
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/rjmalves/ferrompi.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/ferrompi.git`
 3. Create a branch: `git checkout -b feature/my-feature`
 4. Make your changes
 5. Run tests locally (see below)
