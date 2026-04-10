@@ -882,7 +882,15 @@ int ferrompi_win_flush_all(int32_t win);
  * ============================================================ */
 
 /**
- * Get MPI library version string
+ * Get MPI library version string (implementation-specific, e.g. "Open MPI v4.1.6")
+ * @param buf Output buffer (at least MPI_MAX_LIBRARY_VERSION_STRING bytes)
+ * @param len Output: actual length
+ * @return MPI error code
+ */
+int ferrompi_get_library_version(char* buf, int32_t* len);
+
+/**
+ * Get MPI standard version string (e.g. "MPI 4.0")
  * @param version Output buffer (at least 256 bytes)
  * @param len Output: actual length
  * @return MPI error code

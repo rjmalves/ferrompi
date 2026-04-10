@@ -715,6 +715,7 @@ extern "C" {
     // Utility Functions
     // ============================================================
 
+    pub fn ferrompi_get_library_version(buf: *mut c_char, len: *mut int32_t) -> c_int;
     pub fn ferrompi_get_version(version: *mut c_char, len: *mut int32_t) -> c_int;
     pub fn ferrompi_get_processor_name(name: *mut c_char, len: *mut int32_t) -> c_int;
     pub fn ferrompi_wtime() -> c_double;

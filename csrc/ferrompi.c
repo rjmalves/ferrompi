@@ -2384,6 +2384,17 @@ int ferrompi_win_flush_all(int32_t win_handle) {
  * Utility Functions
  * ============================================================ */
 
+int ferrompi_get_library_version(char* buf, int32_t* len) {
+    int l = 0;
+    int ret = MPI_Get_library_version(buf, &l);
+    if (ret == MPI_SUCCESS) {
+        *len = l;
+    } else {
+        *len = 0;
+    }
+    return ret;
+}
+
 int ferrompi_get_version(char* version, int32_t* len) {
     int version_num, subversion_num;
     int ret = MPI_Get_version(&version_num, &subversion_num);

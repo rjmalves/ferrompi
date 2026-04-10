@@ -129,6 +129,31 @@ impl Communicator {
         Ok(s.to_string())
     }
 
+    /// Gather topology information from all ranks in this communicator.
+    ///
+    /// This is a **collective operation** — all ranks must call it.
+    /// Every rank receives the complete [`TopologyInfo`], which includes the
+    /// rank-to-host mapping, MPI version metadata, and (with the `numa`
+    /// feature) SLURM job information.
+    ///
+    /// [`TopologyInfo`]: crate::TopologyInfo
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let topo = world.topology(&mpi).unwrap();
+    /// if world.rank() == 0 {
+    ///     println!("{topo}");
+    /// }
+    /// ```
+    pub fn topology(&self, mpi: &crate::Mpi) -> Result<crate::TopologyInfo> {
+        crate::topology::gather_topology(self, mpi)
+    }
+
     /// Duplicate this communicator.
     pub fn duplicate(&self) -> Result<Self> {
         let mut new_handle: i32 = 0;
