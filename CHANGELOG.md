@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-10
+
+### Added
+
+- **Topology reporting** -- New `Communicator::topology(&mpi)` collective that
+  gathers rank-to-host mapping across all processes and returns a `TopologyInfo`
+  struct. The `Display` implementation produces a human-readable report showing
+  MPI library version, standard version, thread level, process distribution
+  across nodes, and (with the `numa` feature) SLURM job metadata.
+- **`Mpi::library_version()`** -- Returns the MPI implementation version string
+  (e.g. "Open MPI v4.1.6") by wrapping `MPI_Get_library_version`.
+- **`TopologyInfo`**, **`HostEntry`**, and **`SlurmInfo`** public types with
+  accessors for programmatic inspection of job topology.
+- **`topology` example** -- Demonstrates one-liner topology reporting and
+  programmatic access to host/rank mapping.
+
+### Fixed
+
+- 34 findings from security/correctness assessment addressed.
+
 ## [0.2.2] - 2026-03-27
 
 ### Fixed

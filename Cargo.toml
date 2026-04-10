@@ -1,6 +1,6 @@
 [package]
 name = "ferrompi"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Rogerio Alves"]
@@ -95,6 +95,10 @@ path = "examples/test_lifecycle.rs"
 [[example]]
 name = "test_info"
 path = "examples/test_info.rs"
+
+[[example]]
+name = "topology"
+path = "examples/topology.rs"
 
 [[example]]
 name = "test_persistent"
