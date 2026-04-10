@@ -116,5 +116,3 @@ default = []
 rma = []
 # Enable NUMA-aware shared memory windows and SLURM helpers (implies rma)
 numa = ["rma"]
-# Enable detailed debug output
-debug = []

@@ -911,6 +911,17 @@ double ferrompi_wtime(void);
  */
 int ferrompi_abort(int32_t comm, int32_t errorcode);
 
+/* ============================================================
+ * Error Class Constants
+ * ============================================================ */
+
+/** Get the MPI_ERR_FILE error class value (implementation-specific). */
+int32_t ferrompi_err_file(void);
+/** Get the MPI_ERR_INFO error class value (implementation-specific). */
+int32_t ferrompi_err_info(void);
+/** Get the MPI_ERR_WIN error class value (implementation-specific). */
+int32_t ferrompi_err_win(void);
+
 #ifdef __cplusplus
 }
 #endif
