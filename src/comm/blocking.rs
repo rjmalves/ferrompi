@@ -1,7 +1,7 @@
 //! Blocking collective operations: barrier, broadcast, reduce, allreduce, scan, gather, scatter, alltoall.
 
 use crate::comm::Communicator;
-use crate::datatype::{MpiDatatype, MpiIndexedDatatype};
+use crate::datatype::{BytePermutable, DatatypeTag, MpiDatatype, MpiIndexedDatatype};
 use crate::error::{Error, Result};
 use crate::ffi;
 use crate::ReduceOp;
@@ -336,6 +336,94 @@ impl Communicator {
         Error::check(ret)
     }
 
+    /// All-reduce arbitrary `Copy` types using `MPI_BYTE`-typed bitwise reductions.
+    ///
+    /// Performs a bitwise reduction across all ranks in the communicator. Each
+    /// element of `recv` receives the result of applying `op` element-wise across
+    /// the corresponding elements of each rank's `send` buffer.
+    ///
+    /// The buffer is transmitted as a flat array of bytes via `MPI_BYTE`, so the
+    /// count passed to MPI is `send.len() * size_of::<T>()`.
+    ///
+    /// Only `BitwiseOr`, `BitwiseAnd`, `BitwiseXor` are accepted. For
+    /// floating-point or indexed reductions, use [`allreduce`] or
+    /// [`allreduce_indexed`].
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data contributed by this process
+    /// * `recv` - Output buffer; must be the same length as `send`
+    /// * `op` - Must be [`ReduceOp::BitwiseOr`], [`ReduceOp::BitwiseAnd`], or
+    ///   [`ReduceOp::BitwiseXor`]
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidOp`] if `op` is not one of the three bitwise ops
+    /// - [`Error::InvalidBuffer`] if `send.len() != recv.len()` or the total
+    ///   byte count overflows `i64::MAX`
+    /// - [`Error::Mpi`] if the MPI layer rejects the call
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::{Mpi, ReduceOp};
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let rank = world.rank() as u64;
+    ///
+    /// // Each rank contributes a different bit; OR across all ranks gives 0b1111
+    /// let data: [u64; 4] = [1u64 << rank; 4];
+    /// let mut recv = [0u64; 4];
+    /// world.allreduce_bytes(&data, &mut recv, ReduceOp::BitwiseOr).unwrap();
+    /// assert_eq!(recv, [0b1111u64; 4]);
+    /// ```
+    ///
+    /// [`allreduce`]: Communicator::allreduce
+    /// [`allreduce_indexed`]: Communicator::allreduce_indexed
+    pub fn allreduce_bytes<T: BytePermutable>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: ReduceOp,
+    ) -> Result<()> {
+        if !matches!(
+            op,
+            ReduceOp::BitwiseOr | ReduceOp::BitwiseAnd | ReduceOp::BitwiseXor
+        ) {
+            return Err(Error::InvalidOp);
+        }
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let byte_count = send
+            .len()
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or(Error::InvalidBuffer)?;
+        if byte_count > i64::MAX as usize {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            // SAFETY:
+            // - send and recv are valid slices of T where T: BytePermutable (Copy + Send + 'static).
+            // - byte_count = send.len() * size_of::<T>() bytes, which is the exact memory
+            //   footprint of each slice. The cast to *const c_void / *mut c_void is safe
+            //   because we pass the byte count to MPI (MPI_BYTE datatype), so MPI treats
+            //   the buffer as raw bytes matching exactly the memory of the slices.
+            // - DatatypeTag::Byte maps to MPI_BYTE in the C layer (case FERROMPI_BYTE).
+            // - send and recv do not alias (send is &[T], recv is &mut [T]).
+            ffi::ferrompi_allreduce(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                byte_count as i64,
+                DatatypeTag::Byte as i32,
+                op as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
     /// Inclusive prefix reduction (scan).
     ///
     /// On rank `i`, `recv` contains the reduction of `send` values from ranks
@@ -541,6 +629,240 @@ impl Communicator {
         Error::check(ret)
     }
 
+    /// Gather values in place. At root, `data` is both the send contribution and the
+    /// receive buffer; non-root ranks must call `gather` (not `gather_inplace`) — this
+    /// method returns `Error::InvalidOp` on non-root.
+    ///
+    /// # Buffer Layout (root)
+    ///
+    /// `data` must have length `recvcount * size()` where `recvcount` is the per-rank
+    /// count. Rank `r`'s contribution lives at offset `r * recvcount`. Root's own
+    /// contribution must be pre-written into `data[rank() * recvcount .. (rank()+1) *
+    /// recvcount]`.
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidOp` if this rank is not `root`.
+    /// - `Error::InvalidBuffer` if `data.len()` is not divisible by `size()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank() as usize;
+    /// let size = world.size() as usize;
+    /// // Root allocates the full buffer; each rank's slot is at offset rank * recvcount.
+    /// // recvcount = 1 in this example.
+    /// if world.rank() == 0 {
+    ///     let mut data = vec![0i32; size]; // slot 0..size
+    ///     data[rank] = rank as i32 * 10;   // root pre-writes its own slot
+    ///     world.gather_inplace(&mut data, 0).unwrap();
+    ///     // data[r] == r * 10 for all r
+    /// }
+    /// ```
+    pub fn gather_inplace<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
+        if self.rank() != root {
+            return Err(Error::InvalidOp);
+        }
+        let size = self.size() as usize;
+        if size == 0 || data.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let recvcount = (data.len() / size) as i64;
+        let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice. We cast to *mut c_void
+            // as required by the C FFI, passing the full buffer as both the in-place send
+            // contribution (root's slot at offset rank*recvcount) and the receive buffer.
+            // is_root is hardcoded to 1 because the guard above guarantees self.rank() == root.
+            ffi::ferrompi_gather_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcount,
+                T::TAG as i32,
+                root,
+                1, // is_root == true by the guard above
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-gather values in place. Every rank's `data` is both send contribution and
+    /// receive buffer.
+    ///
+    /// # Buffer Layout
+    ///
+    /// `data` must have length `recvcount * size()`. Rank `r`'s contribution lives at
+    /// offset `r * recvcount` and must be pre-written before the call.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidBuffer` if `data.len()` is not divisible by `size()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let rank = world.rank() as usize;
+    /// let size = world.size() as usize;
+    /// // Each rank allocates the full buffer and pre-writes its own slot at offset rank.
+    /// let mut data = vec![0i32; size];
+    /// data[rank] = rank as i32 * 10;
+    /// world.allgather_inplace(&mut data).unwrap();
+    /// // data[r] == r * 10 for all r, on every rank
+    /// ```
+    pub fn allgather_inplace<T: MpiDatatype>(&self, data: &mut [T]) -> Result<()> {
+        let size = self.size() as usize;
+        if size == 0 || data.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let recvcount = (data.len() / size) as i64;
+        let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice. We cast to *mut c_void
+            // as required by the C FFI. Each rank's contribution (at offset rank*recvcount)
+            // must be pre-written by the caller; MPI fills the remaining slots in-place.
+            ffi::ferrompi_allgather_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcount,
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// Scatter values in place. At root, `data` is the `sendcount * size()` send buffer;
+    /// root's own slot is retained in place. At non-root, `data` is the
+    /// `recvcount`-element receive buffer.
+    ///
+    /// # Buffer Layout (root)
+    ///
+    /// `data` must have length `sendcount * size()`. Rank `r`'s slot is
+    /// `data[r*sendcount .. (r+1)*sendcount]`. After the call, only root's own slot is
+    /// guaranteed to remain intact; other slots are unspecified.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidBuffer` at root if `data.len()` is not divisible by
+    /// `size()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // With 4 ranks: root pre-populates [0, 10, 20, 30], each non-root has a 1-element buf.
+    /// // After the call: rank 0 retains data[0]==0, rank 1 gets [10], rank 2 [20], rank 3 [30].
+    /// if world.rank() == 0 {
+    ///     let mut data = vec![0i32, 10, 20, 30];
+    ///     world.scatter_inplace(&mut data, 0).unwrap();
+    ///     assert_eq!(data[0], 0); // root retains its own slot
+    /// } else {
+    ///     let mut data = vec![0i32; 1];
+    ///     world.scatter_inplace(&mut data, 0).unwrap();
+    /// }
+    /// ```
+    pub fn scatter_inplace<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
+        let is_root = self.rank() == root;
+        let size = self.size() as usize;
+        let (sendbuf, sendcount, recvbuf, recvcount, is_root_flag) = if is_root {
+            if size == 0 || data.len() % size != 0 {
+                return Err(Error::InvalidBuffer);
+            }
+            let per = (data.len() / size) as i64;
+            (
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                per,
+                std::ptr::null_mut::<std::ffi::c_void>(),
+                0i64,
+                1i32,
+            )
+        } else {
+            (
+                std::ptr::null::<std::ffi::c_void>(),
+                0i64,
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                0i32,
+            )
+        };
+        let ret = unsafe {
+            // SAFETY: At root, sendbuf points to valid data of length sendcount*size elements
+            // (guaranteed by the divisibility check above); recvbuf is null (MPI_IN_PLACE path).
+            // At non-root, recvbuf points to a valid mutable slice of length recvcount elements;
+            // sendbuf is null (MPI standard ignores sendbuf on non-root scatter). Both pointers
+            // are cast to *const/*mut c_void as required by the C FFI. The slice outlives the call.
+            ffi::ferrompi_scatter_inplace(
+                sendbuf,
+                sendcount,
+                recvbuf,
+                recvcount,
+                T::TAG as i32,
+                root,
+                is_root_flag,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
+    /// All-to-all personalized communication in place. `data` is both send and receive
+    /// buffer on every rank. Before the call, rank `r` must pre-write into
+    /// `data[s*count..(s+1)*count]` the payload it wishes to send to rank `s` (for `s`
+    /// in `0..size()`). After the call, the same slot contains the data received FROM
+    /// rank `s`.
+    ///
+    /// # Buffer Layout
+    ///
+    /// `data` must have length `count * size()` where `count` is the per-rank element
+    /// count. Slot `s` at `data[s*count..(s+1)*count]` holds data sent to (and later
+    /// received from) rank `s`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidBuffer` if `data.len()` is not divisible by `size()`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // With 4 ranks: rank r pre-writes data[s] = r*10 + s (payload destined for rank s).
+    /// // After the call: data[s] == s*10 + r (data received FROM rank s).
+    /// let r = world.rank() as i32;
+    /// let size = world.size() as usize;
+    /// let mut data: Vec<i32> = (0..size as i32).map(|s| r * 10 + s).collect();
+    /// world.alltoall_inplace(&mut data).unwrap();
+    /// for s in 0..size as i32 {
+    ///     assert_eq!(data[s as usize], s * 10 + r);
+    /// }
+    /// ```
+    pub fn alltoall_inplace<T: MpiDatatype>(&self, data: &mut [T]) -> Result<()> {
+        let size = self.size() as usize;
+        if size == 0 || data.len() % size != 0 {
+            return Err(Error::InvalidBuffer);
+        }
+        let recvcount = (data.len() / size) as i64;
+        let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of length recvcount*size
+            // elements (guaranteed by the divisibility check above). We cast to *mut c_void as
+            // required by the C FFI. MPI_IN_PLACE is passed as sendbuf in the C wrapper; the
+            // caller must pre-write each slot before calling this method.
+            ffi::ferrompi_alltoall_inplace(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                recvcount,
+                T::TAG as i32,
+                self.handle,
+            )
+        };
+        Error::check(ret)
+    }
+
     /// Scatter values from root to all processes.
     ///
     /// Root sends `recv.len() * size` elements total, each process receives
@@ -737,6 +1059,66 @@ mod tests {
     }
 
     #[test]
+    fn gather_inplace_nonroot_returns_invalid_op() {
+        let comm = Communicator {
+            handle: 0,
+            rank: 1,
+            size: 4,
+        };
+        let mut data = vec![0u32; 4];
+        let result = comm.gather_inplace(&mut data, 0);
+        assert!(matches!(result, Err(Error::InvalidOp)));
+    }
+
+    #[test]
+    fn gather_inplace_mismatched_len_returns_invalid_buffer() {
+        let comm = Communicator {
+            handle: 0,
+            rank: 0,
+            size: 4,
+        };
+        let mut data = vec![0u32; 5]; // 5 is not divisible by 4
+        let result = comm.gather_inplace(&mut data, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn allgather_inplace_mismatched_len_returns_invalid_buffer() {
+        let comm = Communicator {
+            handle: 0,
+            rank: 0,
+            size: 4,
+        };
+        let mut data = vec![0u32; 7]; // 7 is not divisible by 4
+        let result = comm.allgather_inplace(&mut data);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn scatter_inplace_root_mismatched_len_returns_invalid_buffer() {
+        let comm = Communicator {
+            handle: 0,
+            rank: 0,
+            size: 4,
+        };
+        let mut data = vec![0u32; 5]; // 5 is not divisible by 4
+        let result = comm.scatter_inplace(&mut data, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoall_inplace_mismatched_len_returns_invalid_buffer() {
+        let comm = Communicator {
+            handle: 0,
+            rank: 0,
+            size: 4,
+        };
+        let mut data = vec![0u32; 7]; // 7 is not divisible by 4
+        let result = comm.alltoall_inplace(&mut data);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
     fn allreduce_indexed_invalid_op_returns_invalid_op() {
         let comm = dummy_comm();
         let send = vec![
@@ -771,5 +1153,23 @@ mod tests {
                 "Expected InvalidOp for op {op:?} on indexed type"
             );
         }
+    }
+
+    #[test]
+    fn allreduce_bytes_invalid_op_returns_invalid_op() {
+        let comm = dummy_comm();
+        let send = [1u32; 4];
+        let mut recv = [0u32; 4];
+        let result = comm.allreduce_bytes(&send, &mut recv, ReduceOp::Sum);
+        assert!(matches!(result, Err(Error::InvalidOp)));
+    }
+
+    #[test]
+    fn allreduce_bytes_mismatched_buffers_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = [1u32; 4];
+        let mut recv = [0u32; 3];
+        let result = comm.allreduce_bytes(&send, &mut recv, ReduceOp::BitwiseOr);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
     }
 }

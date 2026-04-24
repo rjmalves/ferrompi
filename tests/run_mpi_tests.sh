@@ -166,10 +166,25 @@ run_test test_blocking_extra
 run_test test_nonblocking
 run_test test_p2p_extra
 run_test test_nonblocking_collectives
+run_test test_waitany 4
+run_test test_cancel 2
 run_test test_persistent
 run_test test_info 2
 run_test test_comm_split 4
 run_test test_errhandler_returns
+run_test test_gather_inplace 4
+run_test test_allgather_inplace 4
+run_test test_scatter_inplace 4
+run_test test_alltoall_inplace 4
+run_test test_igather_inplace 4
+run_test test_iallgather_inplace 4
+run_test test_iscatter_inplace 4
+run_test test_ialltoall_inplace 4
+run_test test_gather_init_inplace 4
+run_test test_allgather_init_inplace 4
+run_test test_scatter_init_inplace 4
+run_test test_alltoall_init_inplace 4
+run_test test_allreduce_bytes 4
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"

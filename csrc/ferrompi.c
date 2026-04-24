@@ -231,6 +231,7 @@ static MPI_Datatype get_datatype(int32_t tag) {
         case FERROMPI_2INT:            return MPI_2INT;
         case FERROMPI_SHORT_INT:       return MPI_SHORT_INT;
         case FERROMPI_LONG_DOUBLE_INT: return MPI_LONG_DOUBLE_INT;
+        case FERROMPI_BYTE:            return MPI_BYTE;
         default:                       return MPI_DATATYPE_NULL;
     }
 }
@@ -829,6 +830,94 @@ int ferrompi_allreduce_inplace(void* buf, int64_t count, int32_t datatype_tag, i
     return MPI_Allreduce(MPI_IN_PLACE, buf, (int)count, dt, mpi_op, comm);
 }
 
+int ferrompi_gather_inplace(void* recvbuf, int64_t recvcount,
+                             int32_t datatype_tag, int32_t root,
+                             int32_t is_root, int32_t comm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (!is_root) {
+        /* MPI_IN_PLACE is only valid at root for MPI_Gather. */
+        return MPI_ERR_ARG;
+    }
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        return MPI_Gather_c(MPI_IN_PLACE, 0, dt,
+                            recvbuf, (MPI_Count)recvcount, dt,
+                            root, comm);
+    }
+#endif
+    return MPI_Gather(MPI_IN_PLACE, 0, dt,
+                      recvbuf, (int)recvcount, dt,
+                      root, comm);
+}
+
+int ferrompi_allgather_inplace(void* recvbuf, int64_t recvcount,
+                                int32_t datatype_tag, int32_t comm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        return MPI_Allgather_c(MPI_IN_PLACE, 0, dt,
+                               recvbuf, (MPI_Count)recvcount, dt,
+                               comm);
+    }
+#endif
+    return MPI_Allgather(MPI_IN_PLACE, 0, dt,
+                         recvbuf, (int)recvcount, dt,
+                         comm);
+}
+
+int ferrompi_scatter_inplace(const void* sendbuf, int64_t sendcount,
+                              void* recvbuf, int64_t recvcount,
+                              int32_t datatype_tag, int32_t root,
+                              int32_t is_root, int32_t comm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (is_root) {
+#if MPI_VERSION >= 4
+        if (sendcount > INT_MAX) {
+            return MPI_Scatter_c(sendbuf, (MPI_Count)sendcount, dt,
+                                 MPI_IN_PLACE, 0, dt,
+                                 root, comm);
+        }
+#endif
+        return MPI_Scatter(sendbuf, (int)sendcount, dt,
+                           MPI_IN_PLACE, 0, dt,
+                           root, comm);
+    } else {
+#if MPI_VERSION >= 4
+        if (recvcount > INT_MAX) {
+            return MPI_Scatter_c(NULL, 0, dt,
+                                 recvbuf, (MPI_Count)recvcount, dt,
+                                 root, comm);
+        }
+#endif
+        return MPI_Scatter(NULL, 0, dt,
+                           recvbuf, (int)recvcount, dt,
+                           root, comm);
+    }
+}
+
+int ferrompi_alltoall_inplace(void* recvbuf, int64_t recvcount,
+                               int32_t datatype_tag, int32_t comm_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        return MPI_Alltoall_c(MPI_IN_PLACE, 0, dt,
+                              recvbuf, (MPI_Count)recvcount, dt,
+                              comm);
+    }
+#endif
+    return MPI_Alltoall(MPI_IN_PLACE, 0, dt,
+                        recvbuf, (int)recvcount, dt,
+                        comm);
+}
+
 int ferrompi_scan(
     const void* sendbuf,
     void* recvbuf,
@@ -1399,6 +1488,143 @@ int ferrompi_ialltoall(
     return ret;
 }
 
+int ferrompi_igather_inplace(void* recvbuf, int64_t recvcount,
+                              int32_t datatype_tag, int32_t root,
+                              int32_t is_root, int32_t comm_handle,
+                              int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (!is_root) return MPI_ERR_ARG;
+    MPI_Request req;
+    int ret;
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        ret = MPI_Igather_c(MPI_IN_PLACE, 0, dt,
+                            recvbuf, (MPI_Count)recvcount, dt,
+                            root, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Igather(MPI_IN_PLACE, 0, dt,
+                          recvbuf, (int)recvcount, dt,
+                          root, comm, &req);
+    }
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_iallgather_inplace(void* recvbuf, int64_t recvcount,
+                                 int32_t datatype_tag, int32_t comm_handle,
+                                 int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        ret = MPI_Iallgather_c(MPI_IN_PLACE, 0, dt,
+                               recvbuf, (MPI_Count)recvcount, dt,
+                               comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Iallgather(MPI_IN_PLACE, 0, dt,
+                             recvbuf, (int)recvcount, dt,
+                             comm, &req);
+    }
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_iscatter_inplace(const void* sendbuf, int64_t sendcount,
+                               void* recvbuf, int64_t recvcount,
+                               int32_t datatype_tag, int32_t root,
+                               int32_t is_root, int32_t comm_handle,
+                               int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+    if (is_root) {
+#if MPI_VERSION >= 4
+        if (sendcount > INT_MAX) {
+            ret = MPI_Iscatter_c(sendbuf, (MPI_Count)sendcount, dt,
+                                 MPI_IN_PLACE, 0, dt,
+                                 root, comm, &req);
+        } else
+#endif
+        {
+            ret = MPI_Iscatter(sendbuf, (int)sendcount, dt,
+                               MPI_IN_PLACE, 0, dt,
+                               root, comm, &req);
+        }
+    } else {
+#if MPI_VERSION >= 4
+        if (recvcount > INT_MAX) {
+            ret = MPI_Iscatter_c(NULL, 0, dt,
+                                 recvbuf, (MPI_Count)recvcount, dt,
+                                 root, comm, &req);
+        } else
+#endif
+        {
+            ret = MPI_Iscatter(NULL, 0, dt,
+                               recvbuf, (int)recvcount, dt,
+                               root, comm, &req);
+        }
+    }
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_ialltoall_inplace(void* recvbuf, int64_t recvcount,
+                                int32_t datatype_tag, int32_t comm_handle,
+                                int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+#if MPI_VERSION >= 4
+    if (recvcount > INT_MAX) {
+        ret = MPI_Ialltoall_c(MPI_IN_PLACE, 0, dt,
+                              recvbuf, (MPI_Count)recvcount, dt, comm, &req);
+    } else
+#endif
+    {
+        ret = MPI_Ialltoall(MPI_IN_PLACE, 0, dt,
+                            recvbuf, (int)recvcount, dt, comm, &req);
+    }
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
 int ferrompi_igatherv(
     const void* sendbuf, int64_t sendcount,
     void* recvbuf, const int32_t* recvcounts, const int32_t* displs,
@@ -1831,6 +2057,97 @@ int ferrompi_alltoall_init(
         }
     }
 
+    return ret;
+}
+
+int ferrompi_gather_init_inplace(void* recvbuf, int64_t recvcount,
+                                  int32_t datatype_tag, int32_t root,
+                                  int32_t is_root, int32_t comm_handle,
+                                  int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (!is_root) return MPI_ERR_ARG;
+    MPI_Request req;
+    int ret = MPI_Gather_init(MPI_IN_PLACE, 0, dt,
+                              recvbuf, (int)recvcount, dt,
+                              root, comm, MPI_INFO_NULL, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_allgather_init_inplace(void* recvbuf, int64_t recvcount,
+                                     int32_t datatype_tag, int32_t comm_handle,
+                                     int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret = MPI_Allgather_init(MPI_IN_PLACE, 0, dt,
+                                 recvbuf, (int)recvcount, dt,
+                                 comm, MPI_INFO_NULL, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_scatter_init_inplace(const void* sendbuf, int64_t sendcount,
+                                   void* recvbuf, int64_t recvcount,
+                                   int32_t datatype_tag, int32_t root,
+                                   int32_t is_root, int32_t comm_handle,
+                                   int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret;
+    if (is_root) {
+        ret = MPI_Scatter_init(sendbuf, (int)sendcount, dt,
+                               MPI_IN_PLACE, 0, dt,
+                               root, comm, MPI_INFO_NULL, &req);
+    } else {
+        ret = MPI_Scatter_init(NULL, 0, dt,
+                               recvbuf, (int)recvcount, dt,
+                               root, comm, MPI_INFO_NULL, &req);
+    }
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_alltoall_init_inplace(void* recvbuf, int64_t recvcount,
+                                    int32_t datatype_tag, int32_t comm_handle,
+                                    int64_t* request_handle) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret = MPI_Alltoall_init(MPI_IN_PLACE, 0, dt,
+                                recvbuf, (int)recvcount, dt,
+                                comm, MPI_INFO_NULL, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
     return ret;
 }
 
@@ -2286,6 +2603,160 @@ int ferrompi_request_free(int64_t request_handle) {
     }
     free_request(request_handle);
     return MPI_SUCCESS;
+}
+
+int ferrompi_request_get_status(int64_t request_handle, int32_t* flag) {
+    MPI_Request* req = get_request_ptr(request_handle);
+    if (!req) return MPI_ERR_REQUEST;
+    int f;
+    int ret = MPI_Request_get_status(*req, &f, MPI_STATUS_IGNORE);
+    *flag = (int32_t)f;
+    return ret;
+}
+
+int ferrompi_cancel(int64_t request_handle) {
+    MPI_Request* req = get_request_ptr(request_handle);
+    if (!req) return MPI_ERR_REQUEST;
+    return MPI_Cancel(req);
+}
+
+int ferrompi_waitany(int64_t count, int64_t* request_handles, int32_t* index) {
+    if (count <= 0) { *index = -1; return MPI_SUCCESS; }
+    if (count > INT_MAX) return MPI_ERR_COUNT;
+    MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
+    if (!reqs) return MPI_ERR_NO_MEM;
+    for (int64_t i = 0; i < count; i++) {
+        MPI_Request* req = get_request_ptr(request_handles[i]);
+        if (!req) { free(reqs); return MPI_ERR_REQUEST; }
+        reqs[i] = *req;
+    }
+    int idx;
+    int ret = MPI_Waitany((int)count, reqs, &idx, MPI_STATUS_IGNORE);
+    if (ret == MPI_SUCCESS) {
+        for (int64_t i = 0; i < count; i++) {
+            MPI_Request* req = get_request_ptr(request_handles[i]);
+            if (req) {
+                *req = reqs[i];
+                if (*req == MPI_REQUEST_NULL) {
+                    free_request(request_handles[i]);
+                }
+            }
+        }
+        *index = (idx == MPI_UNDEFINED) ? -1 : (int32_t)idx;
+    }
+    free(reqs);
+    return ret;
+}
+
+int ferrompi_waitsome(int64_t count, int64_t* request_handles,
+                      int64_t* outcount, int32_t* indices) {
+    if (count <= 0) { *outcount = -1; return MPI_SUCCESS; }
+    if (count > INT_MAX) return MPI_ERR_COUNT;
+    MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
+    if (!reqs) return MPI_ERR_NO_MEM;
+    int* tmp_indices = (int*)malloc(count * sizeof(int));
+    if (!tmp_indices) { free(reqs); return MPI_ERR_NO_MEM; }
+    for (int64_t i = 0; i < count; i++) {
+        MPI_Request* req = get_request_ptr(request_handles[i]);
+        if (!req) { free(tmp_indices); free(reqs); return MPI_ERR_REQUEST; }
+        reqs[i] = *req;
+    }
+    int out;
+    int ret = MPI_Waitsome((int)count, reqs, &out, tmp_indices, MPI_STATUSES_IGNORE);
+    if (ret == MPI_SUCCESS) {
+        if (out == MPI_UNDEFINED) {
+            *outcount = -1;
+        } else {
+            *outcount = (int64_t)out;
+            for (int i = 0; i < out; i++) {
+                indices[i] = (int32_t)tmp_indices[i];
+            }
+        }
+        for (int64_t i = 0; i < count; i++) {
+            MPI_Request* req = get_request_ptr(request_handles[i]);
+            if (req) {
+                *req = reqs[i];
+                if (*req == MPI_REQUEST_NULL) {
+                    free_request(request_handles[i]);
+                }
+            }
+        }
+    }
+    free(tmp_indices);
+    free(reqs);
+    return ret;
+}
+
+int ferrompi_testany(int64_t count, int64_t* request_handles,
+                     int32_t* index, int32_t* flag) {
+    if (count <= 0) { *flag = 1; *index = -1; return MPI_SUCCESS; }
+    if (count > INT_MAX) return MPI_ERR_COUNT;
+    MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
+    if (!reqs) return MPI_ERR_NO_MEM;
+    for (int64_t i = 0; i < count; i++) {
+        MPI_Request* req = get_request_ptr(request_handles[i]);
+        if (!req) { free(reqs); return MPI_ERR_REQUEST; }
+        reqs[i] = *req;
+    }
+    int idx;
+    int f;
+    int ret = MPI_Testany((int)count, reqs, &idx, &f, MPI_STATUS_IGNORE);
+    if (ret == MPI_SUCCESS) {
+        *flag = (int32_t)f;
+        if (f) {
+            for (int64_t i = 0; i < count; i++) {
+                MPI_Request* req = get_request_ptr(request_handles[i]);
+                if (req) {
+                    *req = reqs[i];
+                    if (*req == MPI_REQUEST_NULL) {
+                        free_request(request_handles[i]);
+                    }
+                }
+            }
+            *index = (idx == MPI_UNDEFINED) ? -1 : (int32_t)idx;
+        }
+    }
+    free(reqs);
+    return ret;
+}
+
+int ferrompi_testsome(int64_t count, int64_t* request_handles,
+                      int64_t* outcount, int32_t* indices) {
+    if (count <= 0) { *outcount = -1; return MPI_SUCCESS; }
+    if (count > INT_MAX) return MPI_ERR_COUNT;
+    MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
+    if (!reqs) return MPI_ERR_NO_MEM;
+    int* tmp_indices = (int*)malloc(count * sizeof(int));
+    if (!tmp_indices) { free(reqs); return MPI_ERR_NO_MEM; }
+    for (int64_t i = 0; i < count; i++) {
+        MPI_Request* req = get_request_ptr(request_handles[i]);
+        if (!req) { free(tmp_indices); free(reqs); return MPI_ERR_REQUEST; }
+        reqs[i] = *req;
+    }
+    int out;
+    int ret = MPI_Testsome((int)count, reqs, &out, tmp_indices, MPI_STATUSES_IGNORE);
+    if (ret == MPI_SUCCESS) {
+        if (out == MPI_UNDEFINED) {
+            *outcount = -1;
+        } else {
+            *outcount = (int64_t)out;
+            for (int i = 0; i < out; i++) {
+                indices[i] = (int32_t)tmp_indices[i];
+            }
+        }
+        for (int64_t i = 0; i < count; i++) {
+            MPI_Request* req = get_request_ptr(request_handles[i]);
+            if (req) {
+                *req = reqs[i];
+                if (*req == MPI_REQUEST_NULL) {
+                    free_request(request_handles[i]);
+                }
+            }
+        }
+    }
+    free(tmp_indices);
+    free(reqs);
+    return ret;
 }
 
 /* ============================================================

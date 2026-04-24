@@ -149,7 +149,7 @@ mod window;
 
 pub use comm::{Communicator, SplitType};
 pub use datatype::{
-    DatatypeTag, DoubleInt, FloatInt, Int2, LongDoubleInt, LongInt, MpiDatatype,
+    BytePermutable, DatatypeTag, DoubleInt, FloatInt, Int2, LongDoubleInt, LongInt, MpiDatatype,
     MpiIndexedDatatype, ShortInt,
 };
 pub use error::{Error, MpiErrorClass, Result};

@@ -1,11 +1,13 @@
 //! MPI datatype trait and type tag mapping.
 //!
-//! This module provides two sealed traits:
+//! This module provides three sealed traits:
 //!
 //! - [`MpiDatatype`]: maps primitive Rust types to MPI datatype tags for all
 //!   communication operations (broadcast, send, recv, allreduce with scalar ops).
 //! - [`MpiIndexedDatatype`]: marks the six MPI paired value+index structs that are
 //!   only valid with [`MPI_MAXLOC`/`MPI_MINLOC`](crate::ReduceOp::MaxLoc) reductions.
+//! - [`BytePermutable`]: marks types safe for byte-level bitwise reductions via
+//!   `MPI_BYTE` (`BitwiseOr`, `BitwiseAnd`, `BitwiseXor`).
 //!
 //! # Primitive Types (`MpiDatatype`)
 //!
@@ -29,6 +31,12 @@
 //! | [`Int2`]         | `MPI_2INT`            | 10        |
 //! | [`ShortInt`]     | `MPI_SHORT_INT`       | 11        |
 //! | [`LongDoubleInt`]| `MPI_LONG_DOUBLE_INT` | 12        |
+//!
+//! # Byte-Permutable Types (`BytePermutable`)
+//!
+//! | Rust Type       | MPI Equivalent | Tag Value |
+//! |-----------------|----------------|-----------|
+//! | u8-like bytes   | `MPI_BYTE`     | 13        |
 
 /// Internal module to seal [`MpiDatatype`] — prevents external implementations.
 mod sealed {
@@ -40,6 +48,12 @@ mod sealed {
 /// `MpiIndexedDatatype` must NOT automatically satisfy `MpiDatatype`, and
 /// vice-versa.
 mod sealed_indexed {
+    pub trait Sealed {}
+}
+
+/// Internal module to seal [`BytePermutable`] — a separate seal for types
+/// whose byte representation is valid for `MPI_BYTE`-typed bitwise reductions.
+mod sealed_byte {
     pub trait Sealed {}
 }
 
@@ -79,6 +93,13 @@ pub enum DatatypeTag {
     /// (MAXLOC/MINLOC). Uses `[u8; 16]` on x86_64 where `long double` is 80-bit
     /// extended precision stored in 16 bytes.
     LongDoubleInt = 12,
+    /// Opaque 1-byte unit (`MPI_BYTE`) for type-erased bitwise reductions.
+    ///
+    /// Used exclusively with [`BytePermutable`]-bounded types and
+    /// [`Communicator::allreduce_bytes`]. The count passed to MPI is the
+    /// total byte count (`element_count * size_of::<T>()`), so MPI treats
+    /// the buffer as a flat array of bytes.
+    Byte = 13,
 }
 
 /// Trait for types that can be used in MPI communication operations.
@@ -296,6 +317,54 @@ impl_mpi_indexed_datatype!(Int2, DatatypeTag::Int2);
 impl_mpi_indexed_datatype!(ShortInt, DatatypeTag::ShortInt);
 impl_mpi_indexed_datatype!(LongDoubleInt, DatatypeTag::LongDoubleInt);
 
+// ============================================================
+// Byte-permutable types for MPI_BYTE bitwise reductions
+// ============================================================
+
+/// Trait for types whose byte representation is valid for use with
+/// `MPI_BYTE`-typed bitwise reductions.
+///
+/// This is a **sealed trait** — only types whose memory layout
+/// consists entirely of meaningful bytes (no padding, no
+/// discriminants, no uninhabited cases) can implement it. ferrompi
+/// provides blanket impls for `u8`, `u16`, `u32`, `u64`, `i8`,
+/// `i16`, `i32`, `i64`, plus `[T; N]` where `T: BytePermutable`.
+///
+/// # Safety invariants (enforced by sealing)
+///
+/// - No padding bytes inside the type (every byte is meaningful).
+/// - No niche optimizations: every bit pattern is a valid value.
+/// - `Copy + Send + 'static`.
+///
+/// # Sealed: cannot implement for external types
+///
+/// ```compile_fail
+/// use ferrompi::BytePermutable;
+///
+/// // This must not compile — BytePermutable is sealed.
+/// impl BytePermutable for f64 {}
+/// ```
+pub trait BytePermutable: sealed_byte::Sealed + Copy + Send + 'static {}
+
+macro_rules! impl_byte_permutable {
+    ($ty:ty) => {
+        impl sealed_byte::Sealed for $ty {}
+        impl BytePermutable for $ty {}
+    };
+}
+
+impl_byte_permutable!(u8);
+impl_byte_permutable!(u16);
+impl_byte_permutable!(u32);
+impl_byte_permutable!(u64);
+impl_byte_permutable!(i8);
+impl_byte_permutable!(i16);
+impl_byte_permutable!(i32);
+impl_byte_permutable!(i64);
+
+impl<T: BytePermutable, const N: usize> sealed_byte::Sealed for [T; N] {}
+impl<T: BytePermutable, const N: usize> BytePermutable for [T; N] {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +406,8 @@ mod tests {
         for (i, tag) in tags.iter().enumerate() {
             assert_eq!(*tag as i32, i as i32);
         }
+        // Byte is 13 (after the six indexed types that occupy 7-12)
+        assert_eq!(DatatypeTag::Byte as i32, 13);
     }
 
     #[test]
@@ -394,6 +465,28 @@ mod tests {
         assert_eq!(Int2::TAG as i32, 10);
         assert_eq!(ShortInt::TAG as i32, 11);
         assert_eq!(LongDoubleInt::TAG as i32, 12);
+
+        // Byte must match FERROMPI_BYTE in csrc/ferrompi.h
+        assert_eq!(DatatypeTag::Byte as i32, 13); // FERROMPI_BYTE
+    }
+
+    #[test]
+    fn byte_datatype_tag_is_13() {
+        assert_eq!(DatatypeTag::Byte as i32, 13);
+    }
+
+    #[test]
+    fn byte_permutable_implemented_for_integer_primitives() {
+        fn assert_byte_permutable<T: BytePermutable>() {}
+        assert_byte_permutable::<u8>();
+        assert_byte_permutable::<u16>();
+        assert_byte_permutable::<u32>();
+        assert_byte_permutable::<u64>();
+        assert_byte_permutable::<i8>();
+        assert_byte_permutable::<i16>();
+        assert_byte_permutable::<i32>();
+        assert_byte_permutable::<i64>();
+        assert_byte_permutable::<[u64; 4]>();
     }
 
     #[test]
