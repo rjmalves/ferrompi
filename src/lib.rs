@@ -128,16 +128,8 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
-// Allow certain pedantic lints for existing code
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::similar_names)]
+// Clippy suppressions live at the call site (`#[allow(clippy::NAME)]`
+// with a justification comment) rather than crate-wide.
 
 use std::ffi::c_char;
 

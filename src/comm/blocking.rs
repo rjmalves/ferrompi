@@ -15,6 +15,7 @@ impl Communicator {
     ///
     /// All processes in the communicator must call this function. No process
     /// will return until all processes have entered the barrier.
+    #[inline]
     pub fn barrier(&self) -> Result<()> {
         let ret = unsafe { ffi::ferrompi_barrier(self.handle) };
         Error::check(ret)
@@ -43,6 +44,7 @@ impl Communicator {
     /// }
     /// world.broadcast(&mut data, 0).unwrap();
     /// ```
+    #[inline]
     pub fn broadcast<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
             ffi::ferrompi_bcast(
@@ -194,6 +196,7 @@ impl Communicator {
     /// let mut recv = vec![0.0f64; 10];
     /// world.allreduce(&send, &mut recv, ReduceOp::Sum).unwrap();
     /// ```
+    #[inline]
     pub fn allreduce<T: MpiDatatype>(
         &self,
         send: &[T],

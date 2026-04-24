@@ -125,6 +125,27 @@ pkg-config = "0.3"
 
 [dev-dependencies]
 rand = "0.9"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support", "html_reports", "plotters"] }
+
+[[bench]]
+name = "bench_smoke"
+path = "benches/bench_smoke.rs"
+harness = false
+
+[[bench]]
+name = "allreduce_roundtrip"
+path = "benches/allreduce_roundtrip.rs"
+harness = false
+
+[[bench]]
+name = "persistent_vs_iallreduce"
+path = "benches/persistent_vs_iallreduce.rs"
+harness = false
+
+[[bench]]
+name = "ffi_overhead"
+path = "benches/ffi_overhead.rs"
+harness = false
 
 [features]
 default = []

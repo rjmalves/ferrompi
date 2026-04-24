@@ -127,6 +127,7 @@ impl Communicator {
     /// Get the rank of the calling process in this communicator.
     ///
     /// Returns the cached value stored at construction time. No FFI call is made.
+    #[inline]
     pub fn rank(&self) -> i32 {
         self.rank
     }
@@ -134,6 +135,7 @@ impl Communicator {
     /// Get the number of processes in this communicator.
     ///
     /// Returns the cached value stored at construction time. No FFI call is made.
+    #[inline]
     pub fn size(&self) -> i32 {
         self.size
     }
