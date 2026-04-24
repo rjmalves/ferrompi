@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["ferrompi",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.DatatypeTag.html\" title=\"enum ferrompi::DatatypeTag\">DatatypeTag</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.LockType.html\" title=\"enum ferrompi::LockType\">LockType</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.MpiErrorClass.html\" title=\"enum ferrompi::MpiErrorClass\">MpiErrorClass</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.ReduceOp.html\" title=\"enum ferrompi::ReduceOp\">ReduceOp</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.SplitType.html\" title=\"enum ferrompi::SplitType\">SplitType</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"ferrompi/enum.ThreadLevel.html\" title=\"enum ferrompi::ThreadLevel\">ThreadLevel</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1478]}
