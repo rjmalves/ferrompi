@@ -200,6 +200,18 @@ run_test test_alltoall_init_inplace 4
 run_test test_allreduce_bytes 4
 run_test test_error_context 2
 run_test test_request_table_concurrency 2
+run_test test_group_basic 4
+run_test test_group_set_ops 4
+run_test test_group_ranges 4
+run_test test_comm_from_group 4
+run_test test_group_compare 4
+run_test test_group_translate 4
+run_test test_custom_dt_contiguous 2
+run_test test_custom_dt_vector 2
+run_test test_custom_dt_struct 2
+run_test test_custom_dt_resized 2
+run_test test_custom_dt_p2p 2
+run_test test_mpi_from_group 4
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"

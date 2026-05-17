@@ -131,12 +131,14 @@
 // Clippy suppressions live at the call site (`#[allow(clippy::NAME)]`
 // with a justification comment) rather than crate-wide.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CString};
 
 mod comm;
 mod datatype;
+mod datatype_builder;
 mod error;
 mod ffi;
+mod group;
 mod info;
 mod persistent;
 mod request;
@@ -152,7 +154,9 @@ pub use datatype::{
     BytePermutable, DatatypeTag, DoubleInt, FloatInt, Int2, LongDoubleInt, LongInt, MpiDatatype,
     MpiIndexedDatatype, ShortInt,
 };
+pub use datatype_builder::{CustomDatatype, StructField};
 pub use error::{Error, MpiErrorClass, Result};
+pub use group::{Group, GroupComparison, RankRange};
 pub use info::Info;
 pub use persistent::PersistentRequest;
 pub use request::Request;
@@ -165,6 +169,7 @@ pub use window::{LockAllGuard, LockGuard, LockType, SharedWindow};
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 /// Global flag tracking whether MPI has been initialized
 static MPI_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -321,8 +326,6 @@ impl Mpi {
 
         if ret != 0 {
             MPI_INITIALIZED.store(false, Ordering::SeqCst);
-            // Cannot call Error::from_code here because MPI runtime is not
-            // initialized — MPI_Error_class/MPI_Error_string would be UB.
             return Err(Error::Mpi {
                 class: MpiErrorClass::Raw(ret),
                 code: ret,
@@ -408,6 +411,76 @@ impl Mpi {
         let mut flag: i32 = 0;
         unsafe { ffi::ferrompi_finalized(&mut flag) };
         flag != 0
+    }
+
+    /// Returns `true` if the runtime MPI version is 4.0 or later.
+    ///
+    /// The result is cached after the first call so subsequent calls are O(1).
+    fn supports_create_from_group() -> bool {
+        static SUPPORTED: OnceLock<bool> = OnceLock::new();
+        *SUPPORTED.get_or_init(|| {
+            // Mpi::version() returns a string like "MPI 4.0" or "MPI 3.1".
+            // Extract the major version number from the second whitespace-delimited
+            // token, then its first dot-delimited component.
+            Mpi::version()
+                .ok()
+                .and_then(|v| {
+                    v.split_whitespace()
+                        .nth(1)?
+                        .split('.')
+                        .next()?
+                        .parse::<u32>()
+                        .ok()
+                })
+                .is_some_and(|major| major >= 4)
+        })
+    }
+
+    /// Create a communicator from a group without requiring a parent
+    /// communicator (MPI 4.0+).
+    ///
+    /// `stringtag` must be identical across all ranks that participate
+    /// in the call; ranks with different tags or in different groups
+    /// produce separate communicators.
+    ///
+    /// # Errors
+    ///
+    /// - Returns `Err(Error::Internal(_))` if `stringtag` contains a null byte
+    ///   (the FFI call is never invoked in this case).
+    /// - Returns `Err(Error::NotSupported("MPI_Comm_create_from_group"))` on
+    ///   MPI < 4.0 installations.
+    /// - Returns `Err(Error::Mpi { .. })` if the underlying MPI call fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let g = world.group().unwrap();
+    /// // All ranks participate with the same tag.
+    /// let comm = mpi.create_from_group(&g, "my-tag").unwrap();
+    /// assert_eq!(comm.size(), world.size());
+    /// ```
+    pub fn create_from_group(&self, group: &group::Group, stringtag: &str) -> Result<Communicator> {
+        let c_tag = CString::new(stringtag)
+            .map_err(|_| Error::Internal("stringtag contains null byte".into()))?;
+        if !Self::supports_create_from_group() {
+            return Err(Error::NotSupported(
+                "MPI_Comm_create_from_group".to_string(),
+            ));
+        }
+        let mut new_handle: i32 = -1;
+        // SAFETY: c_tag.as_ptr() is a valid, null-terminated C string that
+        // lives for the duration of this call. group.handle is a valid group
+        // handle obtained from ferrompi_comm_group or a group-constructor shim.
+        // &mut new_handle is a pointer to a stack-allocated i32.
+        let ret = unsafe {
+            ffi::ferrompi_comm_create_from_group(group.handle, c_tag.as_ptr(), &mut new_handle)
+        };
+        Error::check_with_op(ret, "comm_create_from_group")?;
+        Communicator::from_handle(new_handle)
     }
 }
 
@@ -574,5 +647,38 @@ mod tests {
     fn replace_noop_discriminants() {
         assert_eq!(ReduceOp::Replace as i32, 12);
         assert_eq!(ReduceOp::NoOp as i32, 13);
+    }
+
+    // ── Mpi::create_from_group unit tests ─────────────────────────────────
+
+    /// Verify that a `stringtag` containing a null byte is rejected before
+    /// the FFI call is ever invoked.  We test the null-byte path directly
+    /// by calling the public method on a `Group` stub with handle 0
+    /// (MPI_GROUP_EMPTY); the early-return on bad tag means MPI is never
+    /// touched, so no running MPI environment is needed.
+    #[test]
+    fn create_from_group_null_byte_in_tag() {
+        // Construct a minimal stub Mpi to call the method (no MPI calls made
+        // because the null-byte check fires before the version probe or FFI).
+        // We bypass init by constructing the struct directly — this is valid
+        // inside the crate's own test module where the fields are accessible.
+        let mpi = Mpi {
+            thread_level: ThreadLevel::Single,
+            _marker: PhantomData,
+        };
+        // Group with handle 0 (MPI_GROUP_EMPTY sentinel) — never dereferenced
+        // because the null-byte check fires first.
+        let g = group::Group { handle: 0 };
+        let result = mpi.create_from_group(&g, "bad\0tag");
+        match result {
+            Err(Error::Internal(msg)) => {
+                assert!(
+                    msg.contains("null byte"),
+                    "expected 'null byte' in error message, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected Err(Error::Internal(_)), got Ok(_)"),
+            Err(e) => panic!("expected Err(Error::Internal(_)), got Err({e})"),
+        }
     }
 }

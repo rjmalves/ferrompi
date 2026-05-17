@@ -124,6 +124,54 @@ path = "examples/test_error_context.rs"
 name = "test_request_table_concurrency"
 path = "examples/test_request_table_concurrency.rs"
 
+[[example]]
+name = "test_group_basic"
+path = "examples/test_group_basic.rs"
+
+[[example]]
+name = "test_group_set_ops"
+path = "examples/test_group_set_ops.rs"
+
+[[example]]
+name = "test_group_ranges"
+path = "examples/test_group_ranges.rs"
+
+[[example]]
+name = "test_comm_from_group"
+path = "examples/test_comm_from_group.rs"
+
+[[example]]
+name = "test_group_compare"
+path = "examples/test_group_compare.rs"
+
+[[example]]
+name = "test_group_translate"
+path = "examples/test_group_translate.rs"
+
+[[example]]
+name = "test_custom_dt_contiguous"
+path = "examples/test_custom_dt_contiguous.rs"
+
+[[example]]
+name = "test_custom_dt_vector"
+path = "examples/test_custom_dt_vector.rs"
+
+[[example]]
+name = "test_custom_dt_struct"
+path = "examples/test_custom_dt_struct.rs"
+
+[[example]]
+name = "test_custom_dt_resized"
+path = "examples/test_custom_dt_resized.rs"
+
+[[example]]
+name = "test_custom_dt_p2p"
+path = "examples/test_custom_dt_p2p.rs"
+
+[[example]]
+name = "test_mpi_from_group"
+path = "examples/test_mpi_from_group.rs"
+
 [dependencies]
 
 [build-dependencies]

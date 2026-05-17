@@ -3,12 +3,15 @@
 use crate::comm::{Communicator, SplitType};
 use crate::error::{Error, Result};
 use crate::ffi;
+use crate::group::Group;
 
 impl Communicator {
     /// Get the processor name for this process.
     pub fn processor_name(&self) -> Result<String> {
         let mut buf = [0u8; 256];
         let mut len: i32 = 0;
+        // SAFETY: buf is a 256-byte stack array, exclusively writable; the C shim writes at most
+        // MPI_MAX_PROCESSOR_NAME bytes and sets len to the actual length.
         let ret = unsafe {
             ffi::ferrompi_get_processor_name(buf.as_mut_ptr().cast::<std::ffi::c_char>(), &mut len)
         };
@@ -44,9 +47,42 @@ impl Communicator {
         crate::topology::gather_topology(self, mpi)
     }
 
+    /// Get the group associated with this communicator.
+    ///
+    /// Returns a [`Group`] containing all processes in this communicator.
+    /// Use [`Group::include`] or [`Group::exclude`] on the returned group
+    /// to derive sub-groups, which can then be used with
+    /// `MPI_Comm_create_group` (a future epic).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying `MPI_Comm_group` call fails or if
+    /// the C-side group table is full.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let g = world.group().unwrap();
+    /// assert_eq!(g.size().unwrap(), world.size());
+    /// ```
+    pub fn group(&self) -> Result<Group> {
+        let mut group_handle: i32 = 0;
+        // SAFETY: self.handle is owned by this Communicator; group_handle is an exclusive output.
+        let ret = unsafe { ffi::ferrompi_comm_group(self.handle, &mut group_handle) };
+        Error::check_with_op(ret, "comm_group")?;
+        Ok(Group {
+            handle: group_handle,
+        })
+    }
+
     /// Duplicate this communicator.
     pub fn duplicate(&self) -> Result<Self> {
         let mut new_handle: i32 = 0;
+        // SAFETY: self.handle is owned by this Communicator; new_handle is an exclusive output.
         let ret = unsafe { ffi::ferrompi_comm_dup(self.handle, &mut new_handle) };
         Error::check_with_op(ret, "comm_dup")?;
         Self::from_handle(new_handle)
@@ -73,6 +109,7 @@ impl Communicator {
     /// ```
     pub fn split(&self, color: i32, key: i32) -> Result<Option<Communicator>> {
         let mut new_handle: i32 = 0;
+        // SAFETY: self.handle is owned by this Communicator; remaining arguments are scalars.
         let ret = unsafe { ffi::ferrompi_comm_split(self.handle, color, key, &mut new_handle) };
         Error::check_with_op(ret, "comm_split")?;
         if new_handle < 0 {
@@ -103,6 +140,7 @@ impl Communicator {
     /// ```
     pub fn split_type(&self, split_type: SplitType, key: i32) -> Result<Option<Communicator>> {
         let mut new_handle: i32 = 0;
+        // SAFETY: self.handle is owned by this Communicator; remaining arguments are scalars.
         let ret = unsafe {
             ffi::ferrompi_comm_split_type(self.handle, split_type as i32, key, &mut new_handle)
         };
@@ -137,6 +175,50 @@ impl Communicator {
     pub fn split_shared(&self) -> Result<Communicator> {
         self.split_type(SplitType::Shared, self.rank())?
             .ok_or_else(|| Error::Internal("split_shared returned null communicator".into()))
+    }
+
+    /// Create a sub-communicator from a group.
+    ///
+    /// `group` must be a subset of `self`'s group. This call is collective
+    /// over `self` — every rank in the parent communicator must invoke it,
+    /// even ranks not in `group`.
+    ///
+    /// Returns `Ok(None)` for ranks that are not members of `group`
+    /// (MPI returns `MPI_COMM_NULL` for those ranks). Returns
+    /// `Ok(Some(comm))` for ranks that are members.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `group` contains a rank not present in the parent
+    /// communicator (`MPI_ERR_GROUP`), or if the C-side communicator table is
+    /// full (`MPI_ERR_OTHER`).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::Mpi;
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    /// let g = world.group().unwrap().include(&[0, 2]).unwrap();
+    /// // Collective: every rank calls create_from_group
+    /// if let Some(sub) = world.create_from_group(&g).unwrap() {
+    ///     assert_eq!(sub.size(), 2);
+    /// }
+    /// ```
+    pub fn create_from_group(&self, group: &Group) -> Result<Option<Communicator>> {
+        let mut new_handle: i32 = -1;
+        // SAFETY: self.handle is owned by this Communicator; group.handle is owned by the Group
+        // argument and remains valid for the duration of this call.
+        let ret = unsafe {
+            ffi::ferrompi_comm_create_from_group_parent(self.handle, group.handle, &mut new_handle)
+        };
+        Error::check_with_op(ret, "comm_create_from_group_parent")?;
+        if new_handle < 0 {
+            Ok(None)
+        } else {
+            Self::from_handle(new_handle).map(Some)
+        }
     }
 
     /// Abort MPI execution across all processes in this communicator.
@@ -191,5 +273,21 @@ impl Communicator {
         // destructor that touches MPI state after a failed MPI_Abort
         // has undefined behavior.
         std::process::abort()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::comm::Communicator;
+    use crate::error::Result;
+    use crate::group::Group;
+
+    // Compile-time witness: verifies that create_from_group has the expected signature.
+    #[allow(dead_code)]
+    fn create_from_group_signature_compiles(
+        c: &Communicator,
+        g: &Group,
+    ) -> Result<Option<Communicator>> {
+        c.create_from_group(g)
     }
 }

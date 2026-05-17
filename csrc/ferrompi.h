@@ -165,6 +165,48 @@ int ferrompi_comm_split(int32_t comm, int32_t color, int32_t key, int32_t* newco
  */
 int ferrompi_comm_split_type(int32_t comm, int32_t split_type, int32_t key, int32_t* newcomm);
 
+/**
+ * Create a sub-communicator from a parent communicator and a group (MPI_Comm_create).
+ *
+ * This is a collective operation over the parent communicator — every rank in
+ * comm_handle must call it, even ranks not in group_handle.
+ *
+ * Ranks that are members of group_handle receive a new communicator handle.
+ * Ranks not in group_handle receive newcomm_handle = -1 (MPI returns
+ * MPI_COMM_NULL for those ranks).
+ *
+ * The "parent" suffix disambiguates from the MPI 4.0+ MPI_Comm_create_from_group
+ * (ticket-050), which does not require a parent communicator.
+ *
+ * @param comm_handle   Parent communicator handle
+ * @param group_handle  Group handle (must be a subset of comm_handle's group)
+ * @param newcomm_handle Output: new communicator handle, or -1 if not in group
+ * @return MPI error code
+ */
+int ferrompi_comm_create_from_group_parent(int32_t comm_handle,
+                                           int32_t group_handle,
+                                           int32_t* newcomm_handle);
+
+/**
+ * Create a communicator from a group without requiring a parent communicator
+ * (MPI 4.0+ only, MPI_Comm_create_from_group).
+ *
+ * This is NOT a collective over an existing communicator — the call is
+ * collective only over the processes that share the same group and stringtag.
+ * Ranks with different tags or in different groups produce separate
+ * communicators.
+ *
+ * Returns MPI_ERR_OTHER on MPI < 4.0 (caller maps to Error::NotSupported).
+ *
+ * @param group_handle  Group handle
+ * @param stringtag     Null-terminated string tag (disambiguates concurrent calls)
+ * @param newcomm_handle Output: new communicator handle
+ * @return MPI error code (MPI_ERR_OTHER on MPI < 4.0)
+ */
+int ferrompi_comm_create_from_group(int32_t group_handle,
+                                    const char* stringtag,
+                                    int32_t* newcomm_handle);
+
 /* ============================================================
  * Synchronization
  * ============================================================ */
@@ -1095,6 +1137,373 @@ double ferrompi_wtime(void);
  * @return Does not return
  */
 int ferrompi_abort(int32_t comm, int32_t errorcode);
+
+/* ============================================================
+ * Group Operations
+ * ============================================================ */
+
+/** Sentinel value for slot 0: reserved for MPI_GROUP_EMPTY. */
+#define FERROMPI_GROUP_EMPTY 0
+
+/**
+ * Return the MPI_UNDEFINED sentinel value for this MPI implementation.
+ * Used by Group::rank() to expose the implementation's actual value.
+ */
+int32_t ferrompi_mpi_undefined(void);
+
+/**
+ * Get the group of a communicator (MPI_Comm_group).
+ * @param comm_handle Communicator handle
+ * @param group_handle Output: group handle
+ * @return MPI error code
+ */
+int ferrompi_comm_group(int32_t comm_handle, int32_t* group_handle);
+
+/**
+ * Create a new group from a subset of an existing group (MPI_Group_incl).
+ * @param group_handle Source group handle
+ * @param n Number of ranks to include
+ * @param ranks Array of n ranks from the source group
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code
+ */
+int ferrompi_group_incl(int32_t group_handle, int32_t n, const int32_t* ranks, int32_t* newgroup_handle);
+
+/**
+ * Create a new group excluding specified ranks (MPI_Group_excl).
+ * @param group_handle Source group handle
+ * @param n Number of ranks to exclude
+ * @param ranks Array of n ranks to exclude from the source group
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code
+ */
+int ferrompi_group_excl(int32_t group_handle, int32_t n, const int32_t* ranks, int32_t* newgroup_handle);
+
+/**
+ * Free an MPI group (MPI_Group_free).
+ * @param group_handle Group handle to free (no-op if slot 0 / MPI_GROUP_EMPTY)
+ * @return MPI error code
+ */
+int ferrompi_group_free(int32_t group_handle);
+
+/**
+ * Get the size of a group (MPI_Group_size).
+ * @param group_handle Group handle
+ * @param size Output: number of processes in the group
+ * @return MPI error code
+ */
+int ferrompi_group_size(int32_t group_handle, int32_t* size);
+
+/**
+ * Get the rank of the calling process in a group (MPI_Group_rank).
+ * Returns MPI_UNDEFINED (-1) if the calling process is not in the group.
+ * @param group_handle Group handle
+ * @param rank Output: rank in group, or MPI_UNDEFINED
+ * @return MPI error code
+ */
+int ferrompi_group_rank(int32_t group_handle, int32_t* rank);
+
+/**
+ * Compute the union of two groups (MPI_Group_union).
+ * The result contains all ranks from group1 followed by ranks from group2 not in group1.
+ * @param group1_handle First group handle
+ * @param group2_handle Second group handle
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code
+ */
+int ferrompi_group_union(int32_t group1_handle, int32_t group2_handle, int32_t* newgroup_handle);
+
+/**
+ * Compute the intersection of two groups (MPI_Group_intersection).
+ * The result contains ranks present in both groups, ordered as in group1.
+ * @param group1_handle First group handle
+ * @param group2_handle Second group handle
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code
+ */
+int ferrompi_group_intersection(int32_t group1_handle, int32_t group2_handle, int32_t* newgroup_handle);
+
+/**
+ * Compute the difference of two groups (MPI_Group_difference).
+ * The result contains ranks in group1 that are not in group2, ordered as in group1.
+ * @param group1_handle First group handle
+ * @param group2_handle Second group handle
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code
+ */
+int ferrompi_group_difference(int32_t group1_handle, int32_t group2_handle, int32_t* newgroup_handle);
+
+/**
+ * Create a new group from rank-range triples (MPI_Group_range_incl).
+ *
+ * ranges_flat is a flattened array of length 3*n in
+ * first, last, stride, first, last, stride, ... order.
+ * The result group contains the union of all arithmetic progressions
+ * described by the triples, in the order they appear.
+ *
+ * @param group_handle  Source group handle
+ * @param n             Number of rank-range triples (must be >= 0)
+ * @param ranges_flat   Flattened triples array of length 3*n
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code (MPI_ERR_ARG if n < 0 or group invalid;
+ *         MPI_ERR_NO_MEM if n > 64 and malloc fails)
+ */
+int ferrompi_group_range_incl(int32_t group_handle, int32_t n,
+                               const int32_t* ranges_flat,
+                               int32_t* newgroup_handle);
+
+/**
+ * Create a new group by excluding rank-range triples (MPI_Group_range_excl).
+ *
+ * ranges_flat is a flattened array of length 3*n in
+ * first, last, stride, first, last, stride, ... order.
+ * The result group is the source group minus the union of the triples.
+ *
+ * @param group_handle  Source group handle
+ * @param n             Number of rank-range triples (must be >= 0)
+ * @param ranges_flat   Flattened triples array of length 3*n
+ * @param newgroup_handle Output: new group handle
+ * @return MPI error code (MPI_ERR_ARG if n < 0 or group invalid;
+ *         MPI_ERR_NO_MEM if n > 64 and malloc fails)
+ */
+int ferrompi_group_range_excl(int32_t group_handle, int32_t n,
+                               const int32_t* ranges_flat,
+                               int32_t* newgroup_handle);
+
+/**
+ * Compare two groups (MPI_Group_compare).
+ *
+ * Normalises the MPI_IDENT / MPI_SIMILAR / MPI_UNEQUAL constants to
+ * ferrompi-stable values (0 / 1 / 2) so the Rust #[repr(i32)] enum can
+ * use fixed discriminants regardless of MPI implementation.
+ *
+ * @param group1_handle First group handle
+ * @param group2_handle Second group handle
+ * @param result        Output: 0=Identical, 1=Similar, 2=Unequal
+ * @return MPI error code; MPI_ERR_INTERN if MPI returns an unexpected result
+ */
+int ferrompi_group_compare(int32_t group1_handle, int32_t group2_handle,
+                           int32_t* result);
+
+/**
+ * Translate ranks from one group's rank space into another's
+ * (MPI_Group_translate_ranks).
+ *
+ * Converts each entry in ranks1 (indices into group1) to the corresponding
+ * rank in group2.  Ranks present in group1 but not in group2 are written as
+ * -1 in ranks2 (normalised from MPI_UNDEFINED, whose integer value is not
+ * standardised across implementations).
+ *
+ * @param group1_handle Source group handle
+ * @param n             Number of ranks to translate (must be >= 0)
+ * @param ranks1        Input array of n ranks in group1's rank space
+ * @param group2_handle Target group handle
+ * @param ranks2        Output array of n translated ranks (-1 for unmapped)
+ * @return MPI error code; MPI_ERR_ARG if n < 0 or either group is invalid
+ */
+int ferrompi_group_translate_ranks(int32_t group1_handle, int32_t n,
+                                   const int32_t* ranks1,
+                                   int32_t group2_handle,
+                                   int32_t* ranks2);
+
+/* ============================================================
+ * Custom Datatype Operations
+ * ============================================================ */
+
+/**
+ * Create a contiguous derived datatype and commit it.
+ *
+ * Wraps MPI_Type_contiguous + MPI_Type_commit. The returned handle is
+ * stored in the internal datatype_table and is always committed on return.
+ *
+ * @param count          Number of elements in the contiguous block
+ * @param basetype_tag   Predefined datatype tag (FERROMPI_F32 … FERROMPI_BYTE)
+ * @param newtype_handle Output: handle for the new committed datatype
+ * @return MPI error code; MPI_ERR_OTHER if the datatype_table is full
+ */
+int ferrompi_type_contiguous(int32_t count, int32_t basetype_tag,
+                              int32_t* newtype_handle);
+
+/**
+ * Create a strided vector derived datatype and commit it.
+ *
+ * Wraps MPI_Type_vector + MPI_Type_commit. The returned handle is stored in
+ * the internal datatype_table and is always committed on return.
+ *
+ * @param count          Number of blocks
+ * @param blocklength    Number of base elements per block
+ * @param stride         Number of base elements between the start of
+ *                       consecutive blocks (may be negative)
+ * @param basetype_tag   Predefined datatype tag (FERROMPI_F32 … FERROMPI_BYTE)
+ * @param newtype_handle Output: handle for the new committed datatype
+ * @return MPI error code; MPI_ERR_OTHER if the datatype_table is full
+ */
+int ferrompi_type_vector(int32_t count, int32_t blocklength, int32_t stride,
+                         int32_t basetype_tag, int32_t* newtype_handle);
+
+/**
+ * Create a heterogeneous struct derived datatype and commit it.
+ *
+ * Wraps MPI_Type_create_struct + MPI_Type_commit. Each field is described by
+ * a (blocklength, displacement, basetype_tag) triple. The returned handle is
+ * stored in the internal datatype_table and is always committed on return.
+ *
+ * Uses a 32-slot stack buffer for parallel MPI_Aint/MPI_Datatype arrays; falls
+ * back to heap allocation for count > 32.
+ *
+ * @param count          Number of fields (must be >= 0; MPI requires >= 1 for success)
+ * @param blocklengths   Array of count block lengths
+ * @param displacements  Array of count byte displacements (cast to MPI_Aint)
+ * @param basetype_tags  Array of count predefined datatype tags
+ * @param newtype_handle Output: handle for the new committed datatype
+ * @return MPI error code; MPI_ERR_ARG if count < 0; MPI_ERR_TYPE if any
+ *         basetype tag is unresolvable; MPI_ERR_NO_MEM on heap allocation
+ *         failure; MPI_ERR_OTHER if the datatype_table is full
+ */
+int ferrompi_type_create_struct(int32_t count,
+                                const int32_t* blocklengths,
+                                const int64_t* displacements,
+                                const int32_t* basetype_tags,
+                                int32_t* newtype_handle);
+
+/**
+ * Create a resized datatype with the same payload as an existing committed
+ * datatype but with a new lower bound and extent (MPI_Type_create_resized).
+ *
+ * Common use case: fix an extent mismatch when an array of #[repr(C)] structs
+ * has natural padding-to-alignment that MPI's auto-computed extent does not
+ * match.  The original datatype (old_handle) remains valid and committed; this
+ * function produces a wholly new handle in the datatype_table.
+ *
+ * @param old_handle     Handle of the existing committed datatype
+ * @param lb             New lower bound in bytes (typically 0)
+ * @param extent         New total extent in bytes between consecutive elements
+ * @param newtype_handle Output: handle for the new committed datatype
+ * @return MPI error code; MPI_ERR_TYPE if old_handle is invalid;
+ *         MPI_ERR_ARG if extent is negative (implementation-defined);
+ *         MPI_ERR_OTHER if the datatype_table is full
+ */
+int ferrompi_type_create_resized(int32_t old_handle,
+                                 int64_t lb,
+                                 int64_t extent,
+                                 int32_t* newtype_handle);
+
+/**
+ * Free a committed custom datatype.
+ *
+ * Calls MPI_Type_free and releases the handle slot. No-op for already-freed
+ * slots; returns MPI_ERR_ARG for out-of-range handles.
+ *
+ * @param type_handle Handle returned by ferrompi_type_contiguous (or future builders)
+ * @return MPI error code
+ */
+int ferrompi_type_free(int32_t type_handle);
+
+/* ============================================================
+ * Custom-Datatype Point-to-Point
+ * ============================================================ */
+
+/**
+ * Blocking send using a committed custom datatype.
+ *
+ * Identical to ferrompi_send but looks up the MPI_Datatype via
+ * get_datatype_committed(datatype_handle) instead of get_datatype(tag).
+ *
+ * @param buf              Data buffer
+ * @param count            Number of datatype elements
+ * @param datatype_handle  Custom datatype handle (from ferrompi_type_*builders*)
+ * @param dest             Destination rank
+ * @param tag              Message tag
+ * @param comm             Communicator handle
+ * @return MPI error code
+ */
+int ferrompi_send_custom(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_handle,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm
+);
+
+/**
+ * Blocking receive using a committed custom datatype.
+ *
+ * Identical to ferrompi_recv but looks up the MPI_Datatype via
+ * get_datatype_committed(datatype_handle) instead of get_datatype(tag).
+ *
+ * @param buf              Receive buffer
+ * @param count            Maximum number of datatype elements
+ * @param datatype_handle  Custom datatype handle
+ * @param source           Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag              Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm             Communicator handle
+ * @param actual_source    Output: actual source rank
+ * @param actual_tag       Output: actual tag
+ * @param actual_count     Output: actual count received
+ * @return MPI error code
+ */
+int ferrompi_recv_custom(
+    void* buf,
+    int64_t count,
+    int32_t datatype_handle,
+    int32_t source,
+    int32_t tag,
+    int32_t comm,
+    int32_t* actual_source,
+    int32_t* actual_tag,
+    int64_t* actual_count
+);
+
+/**
+ * Nonblocking send using a committed custom datatype.
+ *
+ * Identical to ferrompi_isend but looks up the MPI_Datatype via
+ * get_datatype_committed(datatype_handle) instead of get_datatype(tag).
+ *
+ * @param buf              Data buffer (must remain valid until request completes)
+ * @param count            Number of datatype elements
+ * @param datatype_handle  Custom datatype handle
+ * @param dest             Destination rank
+ * @param tag              Message tag
+ * @param comm             Communicator handle
+ * @param request          Output: request handle
+ * @return MPI error code
+ */
+int ferrompi_isend_custom(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_handle,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm,
+    int64_t* request
+);
+
+/**
+ * Nonblocking receive using a committed custom datatype.
+ *
+ * Identical to ferrompi_irecv but looks up the MPI_Datatype via
+ * get_datatype_committed(datatype_handle) instead of get_datatype(tag).
+ *
+ * @param buf              Receive buffer (must remain valid until request completes)
+ * @param count            Maximum number of datatype elements
+ * @param datatype_handle  Custom datatype handle
+ * @param source           Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag              Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm             Communicator handle
+ * @param request          Output: request handle
+ * @return MPI error code
+ */
+int ferrompi_irecv_custom(
+    void* buf,
+    int64_t count,
+    int32_t datatype_handle,
+    int32_t source,
+    int32_t tag,
+    int32_t comm,
+    int64_t* request
+);
 
 /* ============================================================
  * Error Class Constants

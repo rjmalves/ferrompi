@@ -2,6 +2,7 @@
 
 use crate::comm::Communicator;
 use crate::datatype::MpiDatatype;
+use crate::datatype_builder::CustomDatatype;
 use crate::error::{Error, Result};
 use crate::ffi;
 use crate::request::Request;
@@ -26,6 +27,8 @@ impl Communicator {
     /// world.send(&data, 1, 0).unwrap();
     /// ```
     pub fn send<T: MpiDatatype>(&self, data: &[T], dest: i32, tag: i32) -> Result<()> {
+        // SAFETY: data.as_ptr() is valid for data.len() elements; MpiDatatype::TAG matches T's
+        // memory layout; the buffer remains valid for the blocking duration of this call.
         let ret = unsafe {
             ffi::ferrompi_send(
                 data.as_ptr().cast::<std::ffi::c_void>(),
@@ -64,6 +67,8 @@ impl Communicator {
         let mut actual_tag: i32 = 0;
         let mut actual_count: i64 = 0;
 
+        // SAFETY: data.as_mut_ptr() is exclusively writable for data.len() elements; MpiDatatype::TAG
+        // matches T's memory layout; the buffer remains valid for the blocking duration of this call.
         let ret = unsafe {
             ffi::ferrompi_recv(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -106,6 +111,8 @@ impl Communicator {
     /// ```
     pub fn isend<T: MpiDatatype>(&self, data: &[T], dest: i32, tag: i32) -> Result<Request> {
         let mut request_handle: i64 = 0;
+        // SAFETY: data.as_ptr() is valid for data.len() elements; the caller must keep the buffer
+        // alive and unmodified until the returned Request is waited on.
         let ret = unsafe {
             ffi::ferrompi_isend(
                 data.as_ptr().cast::<std::ffi::c_void>(),
@@ -148,6 +155,8 @@ impl Communicator {
     /// ```
     pub fn irecv<T: MpiDatatype>(&self, data: &mut [T], source: i32, tag: i32) -> Result<Request> {
         let mut request_handle: i64 = 0;
+        // SAFETY: data.as_mut_ptr() is exclusively writable for data.len() elements; the caller
+        // must not read the buffer until the returned Request is waited on.
         let ret = unsafe {
             ffi::ferrompi_irecv(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -207,6 +216,8 @@ impl Communicator {
         let mut actual_tag: i32 = 0;
         let mut actual_count: i64 = 0;
 
+        // SAFETY: send and recv are valid for their respective lengths, do not alias each other,
+        // and both outlive this blocking call.
         let ret = unsafe {
             ffi::ferrompi_sendrecv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -265,6 +276,7 @@ impl Communicator {
         let mut actual_tag: i32 = 0;
         let mut count: i64 = 0;
 
+        // SAFETY: all arguments are scalar integers or exclusive output pointers; self.handle is owned.
         let ret = unsafe {
             ffi::ferrompi_probe(
                 source,
@@ -319,6 +331,7 @@ impl Communicator {
         let mut actual_tag: i32 = 0;
         let mut count: i64 = 0;
 
+        // SAFETY: all arguments are scalar integers or exclusive output pointers; self.handle is owned.
         let ret = unsafe {
             ffi::ferrompi_iprobe(
                 source,
@@ -341,5 +354,292 @@ impl Communicator {
         } else {
             Ok(None)
         }
+    }
+
+    /// Send a slice of values to another process using a committed custom datatype.
+    ///
+    /// This is the custom-datatype counterpart of [`send`](Self::send). The element
+    /// type `T` is unbounded — the caller is responsible for ensuring that
+    /// `buf` has the layout expected by `datatype`. A mismatch produces a
+    /// well-defined `MPI_ERR_TRUNCATE` error (or another `MPI` error class),
+    /// not memory unsafety, provided `buf` is a valid `&[T]`.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf`      - Buffer to send; MPI count is `buf.len()`
+    /// * `datatype` - Committed custom datatype describing each element
+    /// * `dest`     - Destination rank
+    /// * `tag`      - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{CustomDatatype, DatatypeTag, Mpi, StructField};
+    /// # let _mpi = Mpi::init().unwrap();
+    /// # let world = _mpi.world();
+    /// #[repr(C)]
+    /// struct Pair { v: f64, i: i32 }
+    /// let dt = CustomDatatype::create_struct(&[
+    ///     StructField { blocklength: 1, displacement: 0, basetype: DatatypeTag::F64 },
+    ///     StructField { blocklength: 1, displacement: 8, basetype: DatatypeTag::I32 },
+    /// ]).unwrap();
+    /// let buf = [Pair { v: 1.23456789, i: 42 }];
+    /// world.send_custom(&buf, &dt, 1, 0).unwrap();
+    /// ```
+    pub fn send_custom<T>(
+        &self,
+        buf: &[T],
+        datatype: &CustomDatatype,
+        dest: i32,
+        tag: i32,
+    ) -> Result<()> {
+        // SAFETY: buf.as_ptr() is valid for buf.len() elements; datatype.handle is an owned,
+        // committed CustomDatatype; the buffer outlives this blocking call.
+        let ret = unsafe {
+            ffi::ferrompi_send_custom(
+                buf.as_ptr().cast::<std::ffi::c_void>(),
+                buf.len() as i64,
+                datatype.handle,
+                dest,
+                tag,
+                self.handle,
+            )
+        };
+        Error::check_with_op(ret, "send_custom")
+    }
+
+    /// Receive a slice of values from another process using a committed custom datatype.
+    ///
+    /// This is the custom-datatype counterpart of [`recv`](Self::recv). The element
+    /// type `T` is unbounded — the caller is responsible for ensuring that
+    /// `buf` has the layout expected by `datatype`. A mismatch produces a
+    /// well-defined `MPI_ERR_TRUNCATE` error (or another `MPI` error class),
+    /// not memory unsafety, provided `buf` is a valid `&mut [T]`.
+    ///
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf`      - Receive buffer; MPI count is `buf.len()`
+    /// * `datatype` - Committed custom datatype describing each element
+    /// * `source`   - Source rank (or -1 for any source)
+    /// * `tag`      - Message tag (or -1 for any tag)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{CustomDatatype, DatatypeTag, Mpi, StructField};
+    /// # let _mpi = Mpi::init().unwrap();
+    /// # let world = _mpi.world();
+    /// #[repr(C)]
+    /// #[derive(Clone, Copy)]
+    /// struct Pair { v: f64, i: i32 }
+    /// let dt = CustomDatatype::create_struct(&[
+    ///     StructField { blocklength: 1, displacement: 0, basetype: DatatypeTag::F64 },
+    ///     StructField { blocklength: 1, displacement: 8, basetype: DatatypeTag::I32 },
+    /// ]).unwrap();
+    /// let mut buf = [Pair { v: 0.0, i: 0 }];
+    /// let status = world.recv_custom(&mut buf, &dt, 0, 0).unwrap();
+    /// assert_eq!(status.count, 1);
+    /// ```
+    pub fn recv_custom<T>(
+        &self,
+        buf: &mut [T],
+        datatype: &CustomDatatype,
+        source: i32,
+        tag: i32,
+    ) -> Result<Status> {
+        let mut actual_source: i32 = 0;
+        let mut actual_tag: i32 = 0;
+        let mut actual_count: i64 = 0;
+
+        // SAFETY: buf.as_mut_ptr() is exclusively writable for buf.len() elements; datatype.handle
+        // is an owned, committed CustomDatatype; the buffer outlives this blocking call.
+        let ret = unsafe {
+            ffi::ferrompi_recv_custom(
+                buf.as_mut_ptr().cast::<std::ffi::c_void>(),
+                buf.len() as i64,
+                datatype.handle,
+                source,
+                tag,
+                self.handle,
+                &mut actual_source,
+                &mut actual_tag,
+                &mut actual_count,
+            )
+        };
+        Error::check_with_op(ret, "recv_custom")?;
+        Ok(Status {
+            source: actual_source,
+            tag: actual_tag,
+            count: actual_count,
+        })
+    }
+
+    /// Nonblocking send using a committed custom datatype.
+    ///
+    /// This is the custom-datatype counterpart of [`isend`](Self::isend). The
+    /// send buffer **must not be modified** until the request is completed via
+    /// [`Request::wait()`] or [`Request::test()`].
+    ///
+    /// The element type `T` is unbounded — the caller is responsible for
+    /// ensuring that `buf` has the layout expected by `datatype`.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf`      - Buffer to send (must remain valid until the request completes)
+    /// * `datatype` - Committed custom datatype describing each element
+    /// * `dest`     - Destination rank
+    /// * `tag`      - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{CustomDatatype, DatatypeTag, Mpi, StructField};
+    /// # let _mpi = Mpi::init().unwrap();
+    /// # let world = _mpi.world();
+    /// #[repr(C)]
+    /// struct Pair { v: f64, i: i32 }
+    /// let dt = CustomDatatype::create_struct(&[
+    ///     StructField { blocklength: 1, displacement: 0, basetype: DatatypeTag::F64 },
+    ///     StructField { blocklength: 1, displacement: 8, basetype: DatatypeTag::I32 },
+    /// ]).unwrap();
+    /// let buf = [Pair { v: 1.23456789, i: 42 }];
+    /// let req = world.isend_custom(&buf, &dt, 1, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn isend_custom<T>(
+        &self,
+        buf: &[T],
+        datatype: &CustomDatatype,
+        dest: i32,
+        tag: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        // SAFETY: buf.as_ptr() is valid for buf.len() elements; datatype.handle is an owned,
+        // committed CustomDatatype; the caller must keep the buffer alive until Request completion.
+        let ret = unsafe {
+            ffi::ferrompi_isend_custom(
+                buf.as_ptr().cast::<std::ffi::c_void>(),
+                buf.len() as i64,
+                datatype.handle,
+                dest,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "isend_custom")?;
+        Ok(Request::new(request_handle))
+    }
+
+    /// Nonblocking receive using a committed custom datatype.
+    ///
+    /// This is the custom-datatype counterpart of [`irecv`](Self::irecv). The
+    /// receive buffer **must not be read** until the request is completed via
+    /// [`Request::wait()`] or [`Request::test()`].
+    ///
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
+    ///
+    /// The element type `T` is unbounded — the caller is responsible for
+    /// ensuring that `buf` has the layout expected by `datatype`.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf`      - Receive buffer (must remain valid until the request completes)
+    /// * `datatype` - Committed custom datatype describing each element
+    /// * `source`   - Source rank (or -1 for any source)
+    /// * `tag`      - Message tag (or -1 for any tag)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::{CustomDatatype, DatatypeTag, Mpi, StructField};
+    /// # let _mpi = Mpi::init().unwrap();
+    /// # let world = _mpi.world();
+    /// #[repr(C)]
+    /// #[derive(Clone, Copy)]
+    /// struct Pair { v: f64, i: i32 }
+    /// let dt = CustomDatatype::create_struct(&[
+    ///     StructField { blocklength: 1, displacement: 0, basetype: DatatypeTag::F64 },
+    ///     StructField { blocklength: 1, displacement: 8, basetype: DatatypeTag::I32 },
+    /// ]).unwrap();
+    /// let mut buf = [Pair { v: 0.0, i: 0 }];
+    /// let req = world.irecv_custom(&mut buf, &dt, 0, 0).unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn irecv_custom<T>(
+        &self,
+        buf: &mut [T],
+        datatype: &CustomDatatype,
+        source: i32,
+        tag: i32,
+    ) -> Result<Request> {
+        let mut request_handle: i64 = 0;
+        // SAFETY: buf.as_mut_ptr() is exclusively writable for buf.len() elements; datatype.handle
+        // is an owned, committed CustomDatatype; the caller must not read the buffer until
+        // Request completion.
+        let ret = unsafe {
+            ffi::ferrompi_irecv_custom(
+                buf.as_mut_ptr().cast::<std::ffi::c_void>(),
+                buf.len() as i64,
+                datatype.handle,
+                source,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "irecv_custom")?;
+        Ok(Request::new(request_handle))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::comm::Communicator;
+    use crate::datatype_builder::CustomDatatype;
+    use crate::error::Result;
+    use crate::request::Request;
+    use crate::status::Status;
+
+    /// Compile-time witness: `send_custom` accepts any `T` (no `MpiDatatype` bound).
+    #[allow(dead_code)]
+    fn send_custom_signature_compiles<T>(
+        c: &Communicator,
+        buf: &[T],
+        d: &CustomDatatype,
+    ) -> Result<()> {
+        c.send_custom(buf, d, 1, 0)
+    }
+
+    /// Compile-time witness: `recv_custom` accepts any `T` and returns `Result<Status>`.
+    #[allow(dead_code)]
+    fn recv_custom_signature_compiles<T>(
+        c: &Communicator,
+        buf: &mut [T],
+        d: &CustomDatatype,
+    ) -> Result<Status> {
+        c.recv_custom(buf, d, 0, 0)
+    }
+
+    /// Compile-time witness: `isend_custom` accepts any `T` and returns `Result<Request>`.
+    #[allow(dead_code)]
+    fn isend_custom_signature_compiles<T>(
+        c: &Communicator,
+        buf: &[T],
+        d: &CustomDatatype,
+    ) -> Result<Request> {
+        c.isend_custom(buf, d, 1, 0)
+    }
+
+    /// Compile-time witness: `irecv_custom` accepts any `T` and returns `Result<Request>`.
+    #[allow(dead_code)]
+    fn irecv_custom_signature_compiles<T>(
+        c: &Communicator,
+        buf: &mut [T],
+        d: &CustomDatatype,
+    ) -> Result<Request> {
+        c.irecv_custom(buf, d, 0, 0)
     }
 }

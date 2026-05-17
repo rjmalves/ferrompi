@@ -47,6 +47,77 @@ extern "C" {
         key: int32_t,
         newcomm: *mut int32_t,
     ) -> c_int;
+    pub fn ferrompi_comm_create_from_group_parent(
+        comm: int32_t,
+        group: int32_t,
+        newcomm: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_comm_create_from_group(
+        group: int32_t,
+        stringtag: *const c_char,
+        newcomm: *mut int32_t,
+    ) -> c_int;
+
+    // ============================================================
+    // Group Operations
+    // ============================================================
+
+    pub fn ferrompi_mpi_undefined() -> int32_t;
+    pub fn ferrompi_comm_group(comm: int32_t, group_handle: *mut int32_t) -> c_int;
+    pub fn ferrompi_group_incl(
+        group_handle: int32_t,
+        n: int32_t,
+        ranks: *const int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_excl(
+        group_handle: int32_t,
+        n: int32_t,
+        ranks: *const int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_free(group_handle: int32_t) -> c_int;
+    pub fn ferrompi_group_size(group_handle: int32_t, size: *mut int32_t) -> c_int;
+    pub fn ferrompi_group_rank(group_handle: int32_t, rank: *mut int32_t) -> c_int;
+    pub fn ferrompi_group_union(
+        group1_handle: int32_t,
+        group2_handle: int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_intersection(
+        group1_handle: int32_t,
+        group2_handle: int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_difference(
+        group1_handle: int32_t,
+        group2_handle: int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_range_incl(
+        group_handle: int32_t,
+        n: int32_t,
+        ranges_flat: *const int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_range_excl(
+        group_handle: int32_t,
+        n: int32_t,
+        ranges_flat: *const int32_t,
+        newgroup_handle: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_compare(
+        group1_handle: int32_t,
+        group2_handle: int32_t,
+        result: *mut int32_t,
+    ) -> c_int;
+    pub fn ferrompi_group_translate_ranks(
+        group1_handle: int32_t,
+        n: int32_t,
+        ranks1: *const int32_t,
+        group2_handle: int32_t,
+        ranks2: *mut int32_t,
+    ) -> c_int;
 
     // ============================================================
     // Synchronization
@@ -851,6 +922,86 @@ extern "C" {
     pub fn ferrompi_get_processor_name(name: *mut c_char, len: *mut int32_t) -> c_int;
     pub fn ferrompi_wtime() -> c_double;
     pub fn ferrompi_abort(comm: int32_t, errorcode: int32_t) -> c_int;
+
+    // ============================================================
+    // Custom Datatype Operations
+    // ============================================================
+
+    pub fn ferrompi_type_contiguous(
+        count: int32_t,
+        basetype_tag: int32_t,
+        newtype_handle: *mut int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_type_vector(
+        count: int32_t,
+        blocklength: int32_t,
+        stride: int32_t,
+        basetype_tag: int32_t,
+        newtype_handle: *mut int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_type_create_struct(
+        count: int32_t,
+        blocklengths: *const int32_t,
+        displacements: *const int64_t,
+        basetype_tags: *const int32_t,
+        newtype_handle: *mut int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_type_create_resized(
+        old_handle: int32_t,
+        lb: int64_t,
+        extent: int64_t,
+        newtype_handle: *mut int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_type_free(type_handle: int32_t) -> c_int;
+
+    // ============================================================
+    // Custom-Datatype Point-to-Point
+    // ============================================================
+
+    pub fn ferrompi_send_custom(
+        buf: *const c_void,
+        count: int64_t,
+        datatype_handle: int32_t,
+        dest: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+    ) -> c_int;
+
+    pub fn ferrompi_recv_custom(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_handle: int32_t,
+        source: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        actual_source: *mut int32_t,
+        actual_tag: *mut int32_t,
+        actual_count: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_isend_custom(
+        buf: *const c_void,
+        count: int64_t,
+        datatype_handle: int32_t,
+        dest: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
+
+    pub fn ferrompi_irecv_custom(
+        buf: *mut c_void,
+        count: int64_t,
+        datatype_handle: int32_t,
+        source: int32_t,
+        tag: int32_t,
+        comm: int32_t,
+        request: *mut int64_t,
+    ) -> c_int;
 
     // ============================================================
     // Error Class Constants
