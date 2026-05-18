@@ -8,6 +8,7 @@
 //! Run with: mpiexec -n 4 ./target/debug/examples/test_waitany
 
 use ferrompi::{Mpi, Request};
+use std::time::Duration;
 
 fn main() {
     let mpi = Mpi::init().expect("MPI init failed");
@@ -152,6 +153,136 @@ fn main() {
     }
 
     world.barrier().expect("barrier after Part 2 failed");
+
+    // ========================================================================
+    // Part 3: Post N irecvs + N isends, drive with test_any polling loop
+    // ========================================================================
+    {
+        let mut recv_bufs3: Vec<Vec<f64>> = (0..N).map(|_| vec![0.0f64; 4]).collect();
+        let send_bufs3: Vec<Vec<f64>> = (0..N)
+            .map(|i| vec![(rank * 1000 + i as i32) as f64; 4])
+            .collect();
+
+        let mut requests: Vec<Request> = Vec::with_capacity(N * 2);
+        for (i, buf) in recv_bufs3.iter_mut().enumerate() {
+            let req = world
+                .irecv(buf, prev, 300 + i as i32)
+                .expect("irecv Part 3 failed");
+            requests.push(req);
+        }
+        for (i, buf) in send_bufs3.iter().enumerate() {
+            let req = world
+                .isend(buf, next, 300 + i as i32)
+                .expect("isend Part 3 failed");
+            requests.push(req);
+        }
+
+        let mut completions = 0usize;
+
+        while !requests.is_empty() {
+            match Request::test_any(&mut requests) {
+                Ok(Some(idx)) => {
+                    requests.swap_remove(idx);
+                    completions += 1;
+                }
+                Ok(None) => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(e) => panic!("test_any failed: {e}"),
+            }
+        }
+
+        assert_eq!(
+            completions,
+            N * 2,
+            "rank {rank}: test_any Part 3: expected {} completions, got {completions}",
+            N * 2
+        );
+
+        // Verify received data from the previous rank.
+        for (i, buf) in recv_bufs3.iter().enumerate() {
+            let expected_val = (prev * 1000 + i as i32) as f64;
+            for (j, &v) in buf.iter().enumerate() {
+                assert!(
+                    (v - expected_val).abs() < f64::EPSILON,
+                    "rank {rank}: test_any Part 3: recv_bufs3[{i}][{j}] = {v}, expected {expected_val}"
+                );
+            }
+        }
+
+        if rank == 0 {
+            println!("PASS: test_any polling completed {completions} requests");
+        }
+    }
+
+    world.barrier().expect("barrier after Part 3 failed");
+
+    // ========================================================================
+    // Part 4: Post N irecvs + N isends, drive with test_some polling loop
+    // ========================================================================
+    {
+        let mut recv_bufs4: Vec<Vec<f64>> = (0..N).map(|_| vec![0.0f64; 4]).collect();
+        let send_bufs4: Vec<Vec<f64>> = (0..N)
+            .map(|i| vec![(rank * 1000 + i as i32) as f64; 4])
+            .collect();
+
+        let mut requests: Vec<Request> = Vec::with_capacity(N * 2);
+        for (i, buf) in recv_bufs4.iter_mut().enumerate() {
+            let req = world
+                .irecv(buf, prev, 400 + i as i32)
+                .expect("irecv Part 4 failed");
+            requests.push(req);
+        }
+        for (i, buf) in send_bufs4.iter().enumerate() {
+            let req = world
+                .isend(buf, next, 400 + i as i32)
+                .expect("isend Part 4 failed");
+            requests.push(req);
+        }
+
+        let mut completions = 0usize;
+
+        while !requests.is_empty() {
+            match Request::test_some(&mut requests) {
+                Ok(batch) if !batch.is_empty() => {
+                    let mut sorted = batch.clone();
+                    sorted.sort_unstable_by(|a, b| b.cmp(a));
+                    for idx in sorted {
+                        requests.swap_remove(idx);
+                    }
+                    completions += batch.len();
+                }
+                Ok(_) => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(e) => panic!("test_some failed: {e}"),
+            }
+        }
+
+        assert_eq!(
+            completions,
+            N * 2,
+            "rank {rank}: test_some Part 4: expected {} completions, got {completions}",
+            N * 2
+        );
+
+        // Verify received data from the previous rank.
+        for (i, buf) in recv_bufs4.iter().enumerate() {
+            let expected_val = (prev * 1000 + i as i32) as f64;
+            for (j, &v) in buf.iter().enumerate() {
+                assert!(
+                    (v - expected_val).abs() < f64::EPSILON,
+                    "rank {rank}: test_some Part 4: recv_bufs4[{i}][{j}] = {v}, expected {expected_val}"
+                );
+            }
+        }
+
+        if rank == 0 {
+            println!("PASS: test_some polling completed {completions} requests");
+        }
+    }
+
+    world.barrier().expect("barrier after Part 4 failed");
 
     if rank == 0 {
         println!("\n========================================");

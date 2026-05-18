@@ -166,6 +166,48 @@ fn main() {
     }
 
     // ========================================================================
+    // Test 4: non-commutative reduction — min operation
+    //   Each rank contributes [rank as i32 + 1] (values: 1, 2, ..., size).
+    //   With commute=0, the min reduction is deterministic regardless of MPI's
+    //   allreduce tree algorithm: min(1..=size) == 1 on every rank.
+    //   Expected result: 1 on every rank.
+    // ========================================================================
+    {
+        let op: UserOp<i32> = match UserOp::new_noncommutative(|invec, inoutvec| {
+            for (x, y) in invec.iter().zip(inoutvec.iter_mut()) {
+                if *x < *y {
+                    *y = *x;
+                }
+            }
+        }) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL Test 4: UserOp::new_noncommutative failed: {e}");
+                let _ = world.allreduce_scalar(0i32, ReduceOp::Min);
+                std::process::exit(1);
+            }
+        };
+
+        let send = vec![rank + 1];
+        let mut recv = vec![0i32];
+
+        match world.allreduce_with_op(&send, &mut recv, &op) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL Test 4: allreduce_with_op failed: {e}");
+                local_ok = false;
+            }
+        }
+
+        if recv[0] != 1 {
+            eprintln!("rank {rank}: FAIL Test 4: expected 1, got {}", recv[0]);
+            local_ok = false;
+        } else if rank == 0 {
+            println!("PASS: UserOp non-commutative min (result = {})", recv[0]);
+        }
+    }
+
+    // ========================================================================
     // Sentinel allreduce(Min) — gate process::exit so no rank exits early.
     // ========================================================================
     let global_ok = world

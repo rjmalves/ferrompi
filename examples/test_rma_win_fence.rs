@@ -5,7 +5,7 @@
 //!
 //! Run with: mpiexec -n 2 ./target/debug/examples/test_rma_win_fence
 
-use ferrompi::{Mpi, ReduceOp, Win, WinFenceAssert};
+use ferrompi::{Mpi, Win, WinFenceAssert};
 
 fn main() {
     let mpi = Mpi::init().expect("MPI init failed");
@@ -36,8 +36,6 @@ fn main() {
         return;
     }
 
-    let mut local_ok = true;
-
     // ========================================================================
     // Test 1: Win::fence with WinFenceAssert::default() (no assertion)
     //
@@ -48,24 +46,16 @@ fn main() {
         let win = Win::<f64>::allocate(&world, 16).expect("Win::allocate failed");
 
         // Open the access/exposure epoch
-        if let Err(e) = win.fence(WinFenceAssert::default()) {
-            if rank == 0 {
-                eprintln!("FAIL: first Win::fence(default) returned error: {e}");
-            }
-            local_ok = false;
-        }
+        win.fence(WinFenceAssert::default())
+            .expect("first Win::fence(default) failed");
 
         // Close the epoch
-        if let Err(e) = win.fence(WinFenceAssert::default()) {
-            if rank == 0 {
-                eprintln!("FAIL: second Win::fence(default) returned error: {e}");
-            }
-            local_ok = false;
-        }
+        win.fence(WinFenceAssert::default())
+            .expect("second Win::fence(default) failed");
     }
 
     world.barrier().expect("barrier after test 1 failed");
-    if rank == 0 && local_ok {
+    if rank == 0 {
         println!("PASS: Win::fence with no assertion");
     }
 
@@ -75,22 +65,14 @@ fn main() {
     {
         let win = Win::<i32>::allocate(&world, 8).expect("Win::allocate (i32) failed");
 
-        if let Err(e) = win.fence(WinFenceAssert::none()) {
-            if rank == 0 {
-                eprintln!("FAIL: Win::fence(none) open returned error: {e}");
-            }
-            local_ok = false;
-        }
-        if let Err(e) = win.fence(WinFenceAssert::none()) {
-            if rank == 0 {
-                eprintln!("FAIL: Win::fence(none) close returned error: {e}");
-            }
-            local_ok = false;
-        }
+        win.fence(WinFenceAssert::none())
+            .expect("Win::fence(none) open failed");
+        win.fence(WinFenceAssert::none())
+            .expect("Win::fence(none) close failed");
     }
 
     world.barrier().expect("barrier after test 2 failed");
-    if rank == 0 && local_ok {
+    if rank == 0 {
         println!("PASS: Win::fence with explicit none()");
     }
 
@@ -110,39 +92,22 @@ fn main() {
 
         // If both are non-zero they must be distinct (MPI guarantees that) and
         // their combination must differ from each individually.
-        if no_store_bits != 0
-            && no_put_bits != 0
-            && (combined.bits() == no_store_bits || combined.bits() == no_put_bits)
-        {
-            if rank == 0 {
-                eprintln!(
-                    "FAIL: WinFenceAssert OR result ({}) is not a proper superset \
-                     of no_store ({}) | no_put ({})",
-                    combined.bits(),
-                    no_store_bits,
-                    no_put_bits
-                );
-            }
-            local_ok = false;
+        if no_store_bits != 0 && no_put_bits != 0 {
+            assert!(
+                combined.bits() != no_store_bits && combined.bits() != no_put_bits,
+                "WinFenceAssert OR result ({}) is not a proper superset of \
+                 no_store ({}) | no_put ({})",
+                combined.bits(),
+                no_store_bits,
+                no_put_bits
+            );
         }
     }
 
     world.barrier().expect("barrier after test 3 failed");
-    if rank == 0 && local_ok {
+    if rank == 0 {
         println!("PASS: WinFenceAssert bitflag composition");
     }
-
-    // ========================================================================
-    // Sentinel allreduce(Min) — confirms no rank diverged silently
-    // ========================================================================
-    let global_ok = world
-        .allreduce_scalar(local_ok as i32, ReduceOp::Min)
-        .expect("sentinel allreduce failed");
-
-    assert!(
-        global_ok != 0,
-        "test_rma_win_fence: one or more ranks reported failure"
-    );
 
     world.barrier().expect("final barrier failed");
     if rank == 0 {
