@@ -140,6 +140,7 @@ mod error;
 mod ffi;
 mod group;
 mod info;
+mod op;
 mod persistent;
 mod request;
 #[cfg(feature = "numa")]
@@ -150,6 +151,8 @@ mod topology;
 mod window;
 
 pub use comm::{Communicator, SplitType};
+#[cfg(feature = "rma")]
+pub use datatype::AtomicMpiDatatype;
 pub use datatype::{
     BytePermutable, DatatypeTag, DoubleInt, FloatInt, Int2, LongDoubleInt, LongInt, MpiDatatype,
     MpiIndexedDatatype, ShortInt,
@@ -158,6 +161,7 @@ pub use datatype_builder::{CustomDatatype, StructField};
 pub use error::{Error, MpiErrorClass, Result};
 pub use group::{Group, GroupComparison, RankRange};
 pub use info::Info;
+pub use op::UserOp;
 pub use persistent::PersistentRequest;
 pub use request::Request;
 pub use status::Status;
@@ -165,14 +169,26 @@ pub use status::Status;
 pub use topology::SlurmInfo;
 pub use topology::{HostEntry, TopologyInfo};
 #[cfg(feature = "rma")]
-pub use window::{LockAllGuard, LockGuard, LockType, SharedWindow};
+pub use window::{
+    LockAllGuard, LockGuard, LockType, SharedWindow, Win, WinFenceAssert, WinKind, WinLockAllGuard,
+    WinLockGuard, WinPscwAssert,
+};
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// Global flag tracking whether MPI has been initialized
 static MPI_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Process-wide buffer attached for buffered sends (`MPI_Buffer_attach`).
+///
+/// MPI allows at most one attached buffer per process. This static holds the
+/// `Box<[u8]>` so that the allocation remains valid for the duration of the
+/// attachment. The `Mutex` is held only briefly during `buffer_attach` and
+/// `buffer_detach` transitions; MPI itself manages the buffer between those
+/// two calls.
+static ATTACHED_BUFFER: Mutex<Option<Box<[u8]>>> = Mutex::new(None);
 
 /// MPI thread support levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -482,6 +498,119 @@ impl Mpi {
         Error::check_with_op(ret, "comm_create_from_group")?;
         Communicator::from_handle(new_handle)
     }
+
+    /// Attach a user-provided buffer for use by buffered sends.
+    ///
+    /// This wraps `MPI_Buffer_attach`. Once attached, the buffer is owned by
+    /// MPI until [`buffer_detach`](Self::buffer_detach) is called. Only one
+    /// buffer may be attached per process at a time; attempting to attach a
+    /// second buffer without first detaching returns
+    /// `Err(`[`Error::InvalidOp`]`)`.
+    ///
+    /// The `buffer` is stored in a process-wide static so its allocation
+    /// remains valid for the lifetime of the attachment. You must not access
+    /// the raw bytes of `buffer` between `buffer_attach` and `buffer_detach` —
+    /// MPI owns the contents during that window.
+    ///
+    /// # Buffer Sizing
+    ///
+    /// The recommended buffer size for `N` buffered sends of `count` elements
+    /// of type `T` is:
+    ///
+    /// ```text
+    /// N * (MPI_BSEND_OVERHEAD + count * size_of::<T>())
+    /// ```
+    ///
+    /// `MPI_BSEND_OVERHEAD` is implementation-specific; use at least a few
+    /// hundred extra bytes per buffered send. For safety, use a generous margin.
+    ///
+    /// **Buffers larger than `i32::MAX` bytes** will silently truncate the size
+    /// passed to `MPI_Buffer_attach` (which takes an `int`). MPI will then
+    /// behave as if a smaller buffer was attached.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidOp`] if a buffer is already attached.
+    /// - [`Error::Mpi`] if `MPI_Buffer_attach` fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// let mpi = Mpi::init().unwrap();
+    /// mpi.buffer_attach(vec![0u8; 64 * 1024].into_boxed_slice()).unwrap();
+    /// // ... buffered sends here ...
+    /// let _ = mpi.buffer_detach().unwrap();
+    /// ```
+    pub fn buffer_attach(&self, buffer: Box<[u8]>) -> Result<()> {
+        let mut guard = ATTACHED_BUFFER
+            .lock()
+            .map_err(|_| Error::Internal("ATTACHED_BUFFER mutex poisoned".into()))?;
+        if guard.is_some() {
+            return Err(Error::InvalidOp);
+        }
+        let ptr = buffer.as_ptr() as *mut std::ffi::c_void;
+        let size = buffer.len() as i64;
+        // Store the box in the static BEFORE calling MPI so the memory is
+        // guaranteed alive when MPI begins using the buffer.
+        *guard = Some(buffer);
+        // SAFETY: ptr points to the boxed slice we just stored in the static;
+        // the allocation remains valid until buffer_detach drops it. size is
+        // the exact byte length of that allocation.
+        let ret = unsafe { ffi::ferrompi_buffer_attach(ptr, size) };
+        if ret != 0 {
+            // Roll back: reclaim the box so the caller can retry.
+            guard.take();
+            return Err(Error::from_code_with_op(ret, "buffer_attach"));
+        }
+        Ok(())
+    }
+
+    /// Detach the previously attached buffer and return it to the caller.
+    ///
+    /// This wraps `MPI_Buffer_detach`. The call **blocks** until all buffered
+    /// sends that are currently using the buffer have completed. Once this
+    /// returns, the returned `Box<[u8]>` is owned by the caller again and
+    /// may be dropped or reused.
+    ///
+    /// Do **not** call this from a `Drop` implementation (e.g., on a wrapper
+    /// around `Mpi`). `MPI_Buffer_detach` blocks until pending sends drain;
+    /// blocking inside `Drop` can produce hard-to-diagnose hangs.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidOp`] if no buffer is currently attached.
+    /// - [`Error::Mpi`] if `MPI_Buffer_detach` fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// let mpi = Mpi::init().unwrap();
+    /// mpi.buffer_attach(vec![0u8; 64 * 1024].into_boxed_slice()).unwrap();
+    /// // ... buffered sends ...
+    /// let _buf = mpi.buffer_detach().unwrap(); // dropped here
+    /// ```
+    pub fn buffer_detach(&self) -> Result<Box<[u8]>> {
+        let mut guard = ATTACHED_BUFFER
+            .lock()
+            .map_err(|_| Error::Internal("ATTACHED_BUFFER mutex poisoned".into()))?;
+        if guard.is_none() {
+            return Err(Error::InvalidOp);
+        }
+        let mut out_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut out_size: i64 = 0;
+        // SAFETY: out_ptr and out_size are valid stack-allocated output parameters.
+        // MPI_Buffer_detach writes the buffer pointer and its size into them.
+        let ret = unsafe { ffi::ferrompi_buffer_detach(&mut out_ptr, &mut out_size) };
+        if ret != 0 {
+            return Err(Error::from_code_with_op(ret, "buffer_detach"));
+        }
+        // Reclaim the Box from the static; this is the same allocation MPI just
+        // released. We take() here so the static is cleared atomically.
+        let buf = guard.take().expect("guard was Some; take() must succeed");
+        Ok(buf)
+    }
 }
 
 impl Drop for Mpi {
@@ -647,6 +776,75 @@ mod tests {
     fn replace_noop_discriminants() {
         assert_eq!(ReduceOp::Replace as i32, 12);
         assert_eq!(ReduceOp::NoOp as i32, 13);
+    }
+
+    // ── Mpi::create_from_group unit tests ─────────────────────────────────
+
+    // ── Mpi::buffer_attach / buffer_detach unit tests ─────────────────────
+
+    /// Compile-time witness that buffer_attach and buffer_detach have the
+    /// correct signatures. No MPI runtime is needed — the functions are
+    /// never called.
+    #[test]
+    fn buffer_attach_signature_compiles() {
+        fn _check(mpi: &Mpi, buf: Box<[u8]>) -> Result<()> {
+            mpi.buffer_attach(buf)
+        }
+        fn _check_detach(mpi: &Mpi) -> Result<Box<[u8]>> {
+            mpi.buffer_detach()
+        }
+    }
+
+    /// Calling buffer_attach twice (without a detach in between) must return
+    /// Err(Error::InvalidOp).  We test against the static ATTACHED_BUFFER
+    /// directly by calling the method twice with a stub Mpi.  The first call
+    /// will reach MPI (and may fail for various reasons in a non-MPI test
+    /// environment), so we only rely on the second call returning InvalidOp.
+    /// To avoid touching MPI at all we seed the static manually.
+    #[test]
+    fn buffer_attach_double_attach_returns_invalid_op() {
+        // Seed the static to simulate an already-attached buffer.
+        {
+            let mut g = ATTACHED_BUFFER.lock().unwrap();
+            if g.is_none() {
+                *g = Some(vec![0u8; 4].into_boxed_slice());
+            }
+        }
+
+        let mpi = Mpi {
+            thread_level: ThreadLevel::Single,
+            _marker: PhantomData,
+        };
+        let buf2 = vec![0u8; 8].into_boxed_slice();
+        let result = mpi.buffer_attach(buf2);
+        assert!(
+            matches!(result, Err(Error::InvalidOp)),
+            "expected Err(InvalidOp) on double attach, got: {result:?}"
+        );
+
+        // Clean up: remove the seeded entry so other tests are unaffected.
+        ATTACHED_BUFFER.lock().unwrap().take();
+    }
+
+    /// Calling buffer_detach with no buffer attached must return
+    /// Err(Error::InvalidOp).
+    #[test]
+    fn buffer_detach_without_attach_returns_invalid_op() {
+        // Ensure the static is empty.
+        {
+            let mut g = ATTACHED_BUFFER.lock().unwrap();
+            *g = None;
+        }
+
+        let mpi = Mpi {
+            thread_level: ThreadLevel::Single,
+            _marker: PhantomData,
+        };
+        let result = mpi.buffer_detach();
+        assert!(
+            matches!(result, Err(Error::InvalidOp)),
+            "expected Err(InvalidOp) on detach without attach, got: {result:?}"
+        );
     }
 
     // ── Mpi::create_from_group unit tests ─────────────────────────────────

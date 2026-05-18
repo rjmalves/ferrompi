@@ -4,6 +4,7 @@ use crate::comm::Communicator;
 use crate::datatype::{BytePermutable, DatatypeTag, MpiDatatype, MpiIndexedDatatype};
 use crate::error::{Error, Result};
 use crate::ffi;
+use crate::op::UserOp;
 use crate::ReduceOp;
 
 impl Communicator {
@@ -262,6 +263,64 @@ impl Communicator {
         let mut recv = [value]; // placeholder, will be overwritten
         self.allreduce(&send, &mut recv, op)?;
         Ok(recv[0])
+    }
+
+    /// All-reduce values using a user-defined reduction operation.
+    ///
+    /// Invokes [`MPI_Allreduce`] with the `MPI_Op` registered inside `op`.
+    /// Every rank must call this with the same `op`, the same count, and the
+    /// same datatype `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data contributed by this process
+    /// * `recv` - Output buffer; must be the same length as `send`
+    /// * `op`   - A user-defined reduction op created with [`UserOp::new`]
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `send.len() != recv.len()`
+    /// - An MPI error if the library rejects the call
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::{Mpi, UserOp};
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    ///
+    /// let op: UserOp<f64> = UserOp::new(|invec: &[f64], inoutvec: &mut [f64]| {
+    ///     for (x, y) in invec.iter().zip(inoutvec.iter_mut()) {
+    ///         *y = x.max(*y);
+    ///     }
+    /// }).unwrap();
+    ///
+    /// let send = vec![world.rank() as f64 + 1.5_f64];
+    /// let mut recv = vec![0.0_f64];
+    /// world.allreduce_with_op(&send, &mut recv, &op).unwrap();
+    /// // recv[0] == (world.size() - 1) as f64 + 1.5
+    /// ```
+    pub fn allreduce_with_op<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: &UserOp<T>,
+    ) -> Result<()> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            ffi::ferrompi_allreduce_user_op(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op.raw_handle(),
+                self.handle,
+            )
+        };
+        Error::check_with_op(ret, "allreduce_user_op")
     }
 
     /// All-reduce paired value+index types using `MPI_MAXLOC` or `MPI_MINLOC`.

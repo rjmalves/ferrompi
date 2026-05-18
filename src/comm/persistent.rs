@@ -1,4 +1,4 @@
-//! Persistent collective operations (MPI 4.0+): bcast_init, allreduce_init, etc.
+//! Persistent point-to-point (MPI 1.1+) and persistent collective operations (MPI 4.0+).
 
 use crate::comm::Communicator;
 use crate::datatype::MpiDatatype;
@@ -8,6 +8,323 @@ use crate::persistent::PersistentRequest;
 use crate::ReduceOp;
 
 impl Communicator {
+    // ========================================================================
+    // Persistent Point-to-Point (MPI 1.1+)
+    // ========================================================================
+
+    /// Initialize a persistent send operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// The caller must not modify `data` while the request is active
+    /// (between `start()` and `wait()`).
+    ///
+    /// Available in all MPI versions (MPI 1.1+).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Send buffer (must remain valid for lifetime of handle)
+    /// * `dest` - Destination rank
+    /// * `tag`  - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1.0f64; 100];
+    /// let mut req = world.send_init(&send, 1, 7).unwrap();
+    /// for _ in 0..10 {
+    ///     req.start().unwrap();
+    ///     req.wait().unwrap();
+    /// }
+    /// ```
+    pub fn send_init<T: MpiDatatype>(
+        &self,
+        data: &[T],
+        dest: i32,
+        tag: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            // SAFETY: data is a valid slice of T; cast to *const c_void is the standard
+            // pattern for MPI send buffers. The caller is responsible for not modifying
+            // data while the request is active (between start and wait). The slice must
+            // remain valid for the entire lifetime of the returned PersistentRequest.
+            ffi::ferrompi_send_init(
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                dest,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "send_init")?;
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent buffered-mode send operation.
+    ///
+    /// Buffered sends copy the outgoing message into a user-attached buffer
+    /// and complete immediately at the local side, regardless of whether the
+    /// destination has posted a matching receive. The returned handle can be
+    /// started multiple times with `start()`.
+    ///
+    /// Available in all MPI versions (MPI 1.1+).
+    ///
+    /// # Buffer Requirement
+    ///
+    /// A buffer must be attached via [`Mpi::buffer_attach`] **before** `start()` is
+    /// called on this request. If no buffer is attached when `start()` fires,
+    /// MPI will return an error.
+    ///
+    /// The recommended buffer size is `MPI_BSEND_OVERHEAD + sum(send sizes)`.
+    /// `MPI_BSEND_OVERHEAD` is implementation-specific (typically a few hundred
+    /// bytes); use a generous margin in practice.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Send buffer (must remain valid for lifetime of handle)
+    /// * `dest` - Destination rank
+    /// * `tag`  - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // Attach a 64 KiB buffer before creating buffered send requests.
+    /// mpi.buffer_attach(vec![0u8; 64 * 1024].into_boxed_slice()).unwrap();
+    ///
+    /// let send = vec![1.0f64; 100];
+    /// let mut req = world.bsend_init(&send, 1, 7).unwrap();
+    /// for _ in 0..10 {
+    ///     req.start().unwrap();
+    ///     req.wait().unwrap();
+    /// }
+    ///
+    /// let _ = mpi.buffer_detach().unwrap();
+    /// ```
+    pub fn bsend_init<T: MpiDatatype>(
+        &self,
+        data: &[T],
+        dest: i32,
+        tag: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            // SAFETY: data is a valid slice of T; cast to *const c_void is the standard
+            // pattern for MPI send buffers. The caller is responsible for not modifying
+            // data while the request is active (between start and wait). The slice must
+            // remain valid for the entire lifetime of the returned PersistentRequest.
+            // A buffer must be attached via Mpi::buffer_attach before start() is called.
+            ffi::ferrompi_bsend_init(
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                dest,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "bsend_init")?;
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent ready-mode send operation.
+    ///
+    /// Ready-mode sends skip the MPI protocol negotiation step and are a
+    /// performance optimization. The returned handle can be started multiple
+    /// times with `start()`.
+    ///
+    /// Available in all MPI versions (MPI 1.1+).
+    ///
+    /// # Safety Contract
+    ///
+    /// The matching receive **must** be posted on the destination rank before
+    /// `start()` is called on this request. This means the destination must
+    /// have already called `recv_init` + `start()`, `irecv`, or `recv` before
+    /// the sender calls `start()` here.
+    ///
+    /// Failure to ensure this is **undefined behavior in MPI**: it typically
+    /// results in a hang, but it may also cause a crash or silent data
+    /// corruption depending on the MPI implementation.
+    ///
+    /// The Rust borrow checker cannot enforce this ordering — it is a runtime
+    /// contract between communicating processes. In tests, use an explicit
+    /// `barrier()` after the receiver posts its receive and before the sender
+    /// calls `start()` to ensure the ordering is respected.
+    ///
+    /// The caller must not modify `data` while the request is active
+    /// (between `start()` and `wait()`).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Send buffer (must remain valid for lifetime of handle)
+    /// * `dest` - Destination rank
+    /// * `tag`  - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// // Safety contract: receiver must post recv before we call start().
+    /// // Use a barrier to guarantee the ordering.
+    /// let send = vec![42.0f64; 10];
+    /// let mut req = world.rsend_init(&send, 1, 7).unwrap();
+    /// world.barrier().unwrap(); // recv on rank 1 is posted by now
+    /// req.start().unwrap();
+    /// req.wait().unwrap();
+    /// ```
+    pub fn rsend_init<T: MpiDatatype>(
+        &self,
+        data: &[T],
+        dest: i32,
+        tag: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            // SAFETY: data is a valid slice of T; cast to *const c_void is the standard
+            // pattern for MPI send buffers. The caller is responsible for not modifying
+            // data while the request is active (between start and wait). The slice must
+            // remain valid for the entire lifetime of the returned PersistentRequest.
+            // Additionally, per the MPI ready-mode safety contract, the caller must
+            // ensure the matching receive is already posted before calling start().
+            ffi::ferrompi_rsend_init(
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                dest,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "rsend_init")?;
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent synchronous-mode send operation.
+    ///
+    /// Synchronous-mode sends complete only after the matching receive has
+    /// begun on the destination rank. Unlike standard sends, the MPI
+    /// implementation cannot buffer the message internally: `wait()` on this
+    /// request blocks until the receiver has started its matching receive.
+    ///
+    /// This eliminates the possibility of silent buffering, making it useful
+    /// for debugging deadlocks and for algorithms that require a strict
+    /// sender/receiver handshake. The trade-off is reduced throughput compared
+    /// to standard or buffered sends.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// The caller must not modify `data` while the request is active
+    /// (between `start()` and `wait()`).
+    ///
+    /// Available in all MPI versions (MPI 1.1+).
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Send buffer (must remain valid for lifetime of handle)
+    /// * `dest` - Destination rank
+    /// * `tag`  - Message tag
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let send = vec![1i32; 5];
+    /// let mut req = world.ssend_init(&send, 1, 3).unwrap();
+    /// for _ in 0..5 {
+    ///     req.start().unwrap();
+    ///     req.wait().unwrap(); // returns only after receiver has started
+    /// }
+    /// ```
+    pub fn ssend_init<T: MpiDatatype>(
+        &self,
+        data: &[T],
+        dest: i32,
+        tag: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            // SAFETY: data is a valid slice of T; cast to *const c_void is the standard
+            // pattern for MPI send buffers. The caller is responsible for not modifying
+            // data while the request is active (between start and wait). The slice must
+            // remain valid for the entire lifetime of the returned PersistentRequest.
+            ffi::ferrompi_ssend_init(
+                data.as_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                dest,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "ssend_init")?;
+        Ok(PersistentRequest::new(request_handle))
+    }
+
+    /// Initialize a persistent receive operation.
+    ///
+    /// The returned handle can be started multiple times with `start()`.
+    /// Use `source = -1` for `MPI_ANY_SOURCE` and `tag = -1` for `MPI_ANY_TAG`.
+    ///
+    /// Available in all MPI versions (MPI 1.1+).
+    ///
+    /// # Arguments
+    ///
+    /// * `data`   - Receive buffer (must remain valid for lifetime of handle)
+    /// * `source` - Source rank, or `-1` for `MPI_ANY_SOURCE`
+    /// * `tag`    - Message tag, or `-1` for `MPI_ANY_TAG`
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ferrompi::Mpi;
+    /// # let mpi = Mpi::init().unwrap();
+    /// # let world = mpi.world();
+    /// let mut recv = vec![0.0f64; 100];
+    /// let mut req = world.recv_init(&mut recv, 0, 7).unwrap();
+    /// for _ in 0..10 {
+    ///     req.start().unwrap();
+    ///     req.wait().unwrap();
+    /// }
+    /// ```
+    pub fn recv_init<T: MpiDatatype>(
+        &self,
+        data: &mut [T],
+        source: i32,
+        tag: i32,
+    ) -> Result<PersistentRequest> {
+        let mut request_handle: i64 = 0;
+        let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T; cast to
+            // *mut c_void is the standard pattern for MPI receive buffers. The buffer
+            // must remain valid for the entire lifetime of the returned PersistentRequest;
+            // the caller must call wait() after each start() before accessing the data.
+            ffi::ferrompi_recv_init(
+                data.as_mut_ptr().cast::<std::ffi::c_void>(),
+                data.len() as i64,
+                T::TAG as i32,
+                source,
+                tag,
+                self.handle,
+                &mut request_handle,
+            )
+        };
+        Error::check_with_op(ret, "recv_init")?;
+        Ok(PersistentRequest::new(request_handle))
+    }
+
     // ========================================================================
     // Generic Persistent Collectives (MPI 4.0+)
     // ========================================================================
@@ -781,7 +1098,8 @@ impl Communicator {
 #[cfg(test)]
 mod tests {
     use crate::comm::Communicator;
-    use crate::error::Error;
+    use crate::error::{Error, Result};
+    use crate::persistent::PersistentRequest;
     use crate::ReduceOp;
 
     fn dummy_comm() -> Communicator {
@@ -789,6 +1107,41 @@ mod tests {
             handle: 0,
             rank: 0,
             size: 1,
+        }
+    }
+
+    #[test]
+    fn send_init_signature_compiles() {
+        fn _check(c: &Communicator, buf: &[i32]) -> Result<PersistentRequest> {
+            c.send_init(buf, 0, 0)
+        }
+    }
+
+    #[test]
+    fn bsend_init_signature_compiles() {
+        fn _check(c: &Communicator, buf: &[i32]) -> Result<PersistentRequest> {
+            c.bsend_init(buf, 0, 0)
+        }
+    }
+
+    #[test]
+    fn rsend_init_signature_compiles() {
+        fn _check(c: &Communicator, buf: &[i32]) -> Result<PersistentRequest> {
+            c.rsend_init(buf, 0, 0)
+        }
+    }
+
+    #[test]
+    fn ssend_init_signature_compiles() {
+        fn _check(c: &Communicator, buf: &[i32]) -> Result<PersistentRequest> {
+            c.ssend_init(buf, 0, 0)
+        }
+    }
+
+    #[test]
+    fn recv_init_signature_compiles() {
+        fn _check(c: &Communicator, buf: &mut [i32]) -> Result<PersistentRequest> {
+            c.recv_init(buf, 0, 0)
         }
     }
 

@@ -1,0 +1,237 @@
+//! Integration test for Win PSCW (post/start/complete/wait) active-target epoch helpers.
+//!
+//! Verifies that the four PSCW epoch methods — `Win::post`, `Win::start`,
+//! `Win::complete`, and `Win::wait_exposure` — correctly open and close epochs
+//! without issuing any RMA data operations. Data-movement tests are deferred to
+//! the RMA data-op tickets (ticket-034 / ticket-057 / ticket-058).
+//!
+//! Rank 0 acts as the *target* (exposure side): calls `post` then `wait_exposure`.
+//! Rank 1 acts as the *origin* (access side): calls `start` then `complete`.
+//!
+//! Run with: mpiexec -n 2 ./target/debug/examples/test_rma_win_pscw
+
+use ferrompi::{Mpi, ReduceOp, Win, WinPscwAssert};
+
+fn main() {
+    let mpi = Mpi::init().expect("MPI init failed");
+    let world = mpi.world();
+    let rank = world.rank();
+    let size = world.size();
+
+    assert!(
+        size == 2,
+        "test_rma_win_pscw requires exactly 2 processes, got {size}"
+    );
+
+    // ========================================================================
+    // Probe: PSCW requires MPI >= 3. Skip gracefully on older builds.
+    // ========================================================================
+    let version_str = Mpi::version().unwrap_or_default();
+    let major: u32 = version_str
+        .split_whitespace()
+        .nth(1)
+        .and_then(|v| v.split('.').next())
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(0);
+
+    if major < 3 {
+        if rank == 0 {
+            println!("SKIP: Win PSCW requires MPI >= 3 (got {version_str})");
+        }
+        return;
+    }
+
+    let mut local_ok = true;
+
+    // ========================================================================
+    // Allocate an 8-element f64 window on both ranks.
+    // ========================================================================
+    let win = match Win::<f64>::allocate(&world, 8) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("rank {rank}: FAIL: Win::allocate failed: {e}");
+            // Bail out rather than hang — reduce will propagate the failure.
+            let _ = world.allreduce_scalar(0i32, ReduceOp::Min);
+            return;
+        }
+    };
+
+    // ========================================================================
+    // Test 1: Basic PSCW epoch open/close (WinPscwAssert::default())
+    //
+    // Rank 0 (target): post → wait_exposure
+    // Rank 1 (origin): start → complete
+    //
+    // No data movement — we are only exercising epoch helpers.
+    // ========================================================================
+    if rank == 0 {
+        // Build the access group: ranks that will call Win::start against us.
+        let world_group = match world.group() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: world.group() failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+        let access_group = match world_group.include(&[1]) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: group.include([1]) failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+
+        // Expose our window to rank 1.
+        if let Err(e) = win.post(&access_group, WinPscwAssert::default()) {
+            eprintln!("rank {rank}: FAIL: Win::post failed: {e}");
+            local_ok = false;
+        }
+
+        // Wait for rank 1 to complete its access epoch.
+        if let Err(e) = win.wait_exposure() {
+            eprintln!("rank {rank}: FAIL: Win::wait_exposure failed: {e}");
+            local_ok = false;
+        }
+    } else {
+        // rank == 1: access side
+        // Build the exposure group: ranks that will call Win::post.
+        let world_group = match world.group() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: world.group() failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+        let exposure_group = match world_group.include(&[0]) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: group.include([0]) failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+
+        // Open access epoch to rank 0's window.
+        if let Err(e) = win.start(&exposure_group, WinPscwAssert::default()) {
+            eprintln!("rank {rank}: FAIL: Win::start failed: {e}");
+            local_ok = false;
+        }
+
+        // Close the access epoch (no actual RMA data operations in this test).
+        if let Err(e) = win.complete() {
+            eprintln!("rank {rank}: FAIL: Win::complete failed: {e}");
+            local_ok = false;
+        }
+    }
+
+    world.barrier().expect("barrier after test 1 failed");
+    if rank == 0 && local_ok {
+        println!("PASS: PSCW epoch (post/start/complete/wait)");
+    }
+
+    // ========================================================================
+    // Test 2: Win::test_exposure — poll until exposure epoch closes.
+    //
+    // Rank 0 (target): post → spin on test_exposure until true
+    // Rank 1 (origin): start → complete
+    // ========================================================================
+    if rank == 0 {
+        let world_group = match world.group() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: world.group() [test 2] failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+        let access_group = match world_group.include(&[1]) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: group.include([1]) [test 2] failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+
+        if let Err(e) = win.post(&access_group, WinPscwAssert::default()) {
+            eprintln!("rank {rank}: FAIL: Win::post [test 2] failed: {e}");
+            local_ok = false;
+        }
+
+        // Poll until rank 1 has completed its access epoch.
+        let mut done = false;
+        while !done {
+            match win.test_exposure() {
+                Ok(flag) => done = flag,
+                Err(e) => {
+                    eprintln!("rank {rank}: FAIL: Win::test_exposure failed: {e}");
+                    local_ok = false;
+                    break;
+                }
+            }
+        }
+    } else {
+        // rank == 1
+        let world_group = match world.group() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: world.group() [test 2] failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+        let exposure_group = match world_group.include(&[0]) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("rank {rank}: FAIL: group.include([0]) [test 2] failed: {e}");
+                local_ok = false;
+                let _ = world.allreduce_scalar(local_ok as i32, ReduceOp::Min);
+                return;
+            }
+        };
+
+        if let Err(e) = win.start(&exposure_group, WinPscwAssert::default()) {
+            eprintln!("rank {rank}: FAIL: Win::start [test 2] failed: {e}");
+            local_ok = false;
+        }
+
+        if let Err(e) = win.complete() {
+            eprintln!("rank {rank}: FAIL: Win::complete [test 2] failed: {e}");
+            local_ok = false;
+        }
+    }
+
+    world.barrier().expect("barrier after test 2 failed");
+    if rank == 0 && local_ok {
+        println!("PASS: Win::test_exposure (nonblocking poll)");
+    }
+
+    // ========================================================================
+    // Sentinel allreduce(Min) — confirms no rank diverged silently
+    // ========================================================================
+    let global_ok = world
+        .allreduce_scalar(local_ok as i32, ReduceOp::Min)
+        .expect("sentinel allreduce failed");
+
+    assert!(
+        global_ok != 0,
+        "test_rma_win_pscw: one or more ranks reported failure"
+    );
+
+    world.barrier().expect("final barrier failed");
+    if rank == 0 {
+        println!("\n========================================");
+        println!("All Win PSCW tests passed! (2 tests)");
+        println!("========================================");
+    }
+}

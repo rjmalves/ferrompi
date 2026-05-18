@@ -722,6 +722,179 @@ int ferrompi_ialltoallv(const void* sendbuf, const int32_t* sendcounts, const in
 int ferrompi_ireduce_scatter_block(const void* sendbuf, void* recvbuf, int64_t recvcount, int32_t datatype_tag, int32_t op, int32_t comm, int64_t* request);
 
 /* ============================================================
+ * Persistent Point-to-Point (MPI 1.1+)
+ * ============================================================ */
+
+/**
+ * Initialize a persistent send (MPI_Send_init).
+ *
+ * The returned request handle must be started with ferrompi_start and
+ * completed with ferrompi_wait. It may be restarted multiple times.
+ * The caller must not modify buf between start and wait.
+ *
+ * @param buf          Send buffer
+ * @param count        Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F64, etc.)
+ * @param dest         Destination rank
+ * @param tag          Message tag
+ * @param comm_handle  Communicator handle
+ * @param request_handle Output: persistent request handle
+ * @return MPI error code
+ */
+int ferrompi_send_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+);
+
+/**
+ * Initialize a persistent receive (MPI_Recv_init).
+ *
+ * The returned request handle must be started with ferrompi_start and
+ * completed with ferrompi_wait. It may be restarted multiple times.
+ * Use source=-1 for MPI_ANY_SOURCE and tag=-1 for MPI_ANY_TAG.
+ *
+ * @param buf          Receive buffer (must remain valid for lifetime of handle)
+ * @param count        Maximum number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F64, etc.)
+ * @param source       Source rank (or -1 for MPI_ANY_SOURCE)
+ * @param tag          Message tag (or -1 for MPI_ANY_TAG)
+ * @param comm_handle  Communicator handle
+ * @param request_handle Output: persistent request handle
+ * @return MPI error code
+ */
+int ferrompi_recv_init(
+    void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t source,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+);
+
+/**
+ * Initialize a persistent ready-mode send (MPI_Rsend_init).
+ *
+ * Ready-mode sends require that the matching receive has already been posted
+ * on the destination rank before start() is called. This is an optimization
+ * hint to the MPI implementation to skip protocol negotiation. Calling
+ * start() before the matching receive is posted is undefined behavior in MPI.
+ *
+ * The returned request handle must be started with ferrompi_start and
+ * completed with ferrompi_wait. It may be restarted multiple times.
+ * The caller must not modify buf between start and wait.
+ *
+ * @param buf          Send buffer
+ * @param count        Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F64, etc.)
+ * @param dest         Destination rank
+ * @param tag          Message tag
+ * @param comm_handle  Communicator handle
+ * @param request_handle Output: persistent request handle
+ * @return MPI error code
+ */
+int ferrompi_rsend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+);
+
+/**
+ * Initialize a persistent synchronous-mode send (MPI_Ssend_init).
+ *
+ * Synchronous-mode sends complete only after the matching receive has begun.
+ * Unlike standard sends, the MPI implementation cannot buffer the message
+ * internally, so the sender blocks in wait() until the receiver has called
+ * start() on its matching receive. This eliminates the possibility of silent
+ * buffering, making it useful for debugging deadlocks and for algorithms that
+ * require strict sender/receiver handshake semantics.
+ *
+ * The returned request handle must be started with ferrompi_start and
+ * completed with ferrompi_wait. It may be restarted multiple times.
+ * The caller must not modify buf between start and wait.
+ *
+ * @param buf          Send buffer
+ * @param count        Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F64, etc.)
+ * @param dest         Destination rank
+ * @param tag          Message tag
+ * @param comm_handle  Communicator handle
+ * @param request_handle Output: persistent request handle
+ * @return MPI error code
+ */
+int ferrompi_ssend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+);
+
+/**
+ * Attach a user buffer for use by buffered sends (MPI_Buffer_attach).
+ *
+ * Only one buffer may be attached per process at a time. The size parameter
+ * is cast to int; buffers larger than INT_MAX bytes will truncate or fail.
+ *
+ * @param buffer  Pointer to the buffer (must remain valid until detach)
+ * @param size    Size of the buffer in bytes
+ * @return MPI error code
+ */
+int ferrompi_buffer_attach(void* buffer, int64_t size);
+
+/**
+ * Detach the previously attached buffer (MPI_Buffer_detach).
+ *
+ * Blocks until all buffered sends using the buffer have completed.
+ *
+ * @param buffer  Output: pointer to the detached buffer
+ * @param size    Output: size of the detached buffer in bytes
+ * @return MPI error code
+ */
+int ferrompi_buffer_detach(void** buffer, int64_t* size);
+
+/**
+ * Initialize a persistent buffered-mode send (MPI_Bsend_init).
+ *
+ * Buffered sends require a user buffer to be attached via
+ * ferrompi_buffer_attach before start() is called. The recommended
+ * buffer size is MPI_BSEND_OVERHEAD + sum(send sizes).
+ *
+ * The returned request handle must be started with ferrompi_start and
+ * completed with ferrompi_wait. It may be restarted multiple times.
+ * The caller must not modify buf between start and wait.
+ *
+ * @param buf          Send buffer
+ * @param count        Number of elements
+ * @param datatype_tag Datatype tag (FERROMPI_F64, etc.)
+ * @param dest         Destination rank
+ * @param tag          Message tag
+ * @param comm_handle  Communicator handle
+ * @param request_handle Output: persistent request handle
+ * @return MPI error code
+ */
+int ferrompi_bsend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+);
+
+/* ============================================================
  * Generic Persistent Collectives (MPI 4.0+)
  * ============================================================ */
 
@@ -987,6 +1160,34 @@ int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info,
                                   int32_t comm, void** baseptr, int32_t* win);
 
 /**
+ * Create a general-purpose RMA window over a caller-supplied buffer (MPI_Win_create).
+ *
+ * @param base      Pointer to the local window buffer (may be NULL for zero-size windows)
+ * @param size      Size in bytes of the local window buffer
+ * @param disp_unit Displacement unit in bytes (typically sizeof(T))
+ * @param info      Info handle (negative for MPI_INFO_NULL)
+ * @param comm      Communicator handle
+ * @param win       Output: window handle
+ * @return MPI error code
+ */
+int ferrompi_win_create(void* base, int64_t size, int32_t disp_unit, int32_t info,
+                         int32_t comm, int32_t* win);
+
+/**
+ * Allocate a general-purpose RMA window with MPI-managed memory (MPI_Win_allocate).
+ *
+ * @param size      Size in bytes of the local window buffer
+ * @param disp_unit Displacement unit in bytes (typically sizeof(T))
+ * @param info      Info handle (negative for MPI_INFO_NULL)
+ * @param comm      Communicator handle
+ * @param baseptr   Output: pointer to the MPI-allocated memory
+ * @param win       Output: window handle
+ * @return MPI error code
+ */
+int ferrompi_win_allocate(int64_t size, int32_t disp_unit, int32_t info,
+                           int32_t comm, void** baseptr, int32_t* win);
+
+/**
  * Query the shared-memory region of another rank (MPI_Win_shared_query).
  *
  * Returns the base pointer, size, and displacement unit of the shared
@@ -1024,6 +1225,23 @@ int ferrompi_win_free(int32_t win);
  * @return MPI error code
  */
 int ferrompi_win_fence(int32_t assert_val, int32_t win);
+
+/**
+ * Query the MPI fence assertion mode constants.
+ *
+ * Writes the four fence assertion constants into a 4-element array:
+ *   out[0] = MPI_MODE_NOSTORE
+ *   out[1] = MPI_MODE_NOPUT
+ *   out[2] = MPI_MODE_NOPRECEDE
+ *   out[3] = MPI_MODE_NOSUCCEED
+ *
+ * The values are implementation-defined and must be queried at runtime.
+ * Returns MPI_SUCCESS on MPI >= 3 builds, MPI_ERR_OTHER otherwise.
+ *
+ * @param out 4-element int32_t array to receive the constants
+ * @return MPI error code
+ */
+int ferrompi_win_fence_mode_values(int32_t* out);
 
 /**
  * Lock a window at a target rank (MPI_Win_lock).
@@ -1095,6 +1313,351 @@ int ferrompi_win_flush(int32_t rank, int32_t win);
  * @return MPI error code
  */
 int ferrompi_win_flush_all(int32_t win);
+
+/**
+ * Locally complete pending RMA operations to a target rank (MPI_Win_flush_local).
+ *
+ * Ensures that all RMA operations issued to the target rank have completed
+ * locally (the origin buffer is safe to reuse), but the remote may not yet
+ * have observed the writes. The access epoch is not closed.
+ *
+ * @param rank Target rank
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_flush_local(int32_t rank, int32_t win);
+
+/**
+ * Locally complete pending RMA operations to all ranks (MPI_Win_flush_local_all).
+ *
+ * Ensures that all RMA operations issued to any target have completed locally.
+ * The access epoch is not closed.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_flush_local_all(int32_t win);
+
+/**
+ * Memory barrier between the local public window copy and private copy (MPI_Win_sync).
+ *
+ * Synchronizes the private and public copies of the window. This is a local
+ * operation — it does not require a surrounding epoch.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_sync(int32_t win);
+
+/**
+ * Start an exposure epoch on a window (MPI_Win_post).
+ *
+ * Called by the target ranks to expose their window to the access group.
+ * Must be matched by a corresponding ferrompi_win_wait or ferrompi_win_test.
+ *
+ * @param group  Group of ranks that will issue RMA operations against this window
+ * @param assert_val Assertion hint bitmask (0 for no assertion)
+ * @param win    Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_post(int32_t group, int32_t assert_val, int32_t win);
+
+/**
+ * Start an access epoch on a window (MPI_Win_start).
+ *
+ * Called by the origin ranks to begin issuing RMA operations. The group
+ * identifies the ranks that have called or will call ferrompi_win_post.
+ * Must be matched by a corresponding ferrompi_win_complete.
+ *
+ * @param group  Group of ranks that have called or will call Win_post
+ * @param assert_val Assertion hint bitmask (0 for no assertion)
+ * @param win    Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_start(int32_t group, int32_t assert_val, int32_t win);
+
+/**
+ * Complete an access epoch on a window (MPI_Win_complete).
+ *
+ * Closes the access epoch started by ferrompi_win_start. All RMA
+ * operations issued since the matching Win_start are completed.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_complete(int32_t win);
+
+/**
+ * Complete an exposure epoch on a window (MPI_Win_wait).
+ *
+ * Blocks until all RMA operations issued by the access group are complete.
+ * Closes the exposure epoch started by ferrompi_win_post.
+ *
+ * @param win Window handle
+ * @return MPI error code
+ */
+int ferrompi_win_wait(int32_t win);
+
+/**
+ * Test whether an exposure epoch has completed (MPI_Win_test).
+ *
+ * Nonblocking probe: returns immediately and sets *flag to 1 if the
+ * exposure epoch started by ferrompi_win_post has completed, 0 otherwise.
+ *
+ * @param win  Window handle
+ * @param flag Output: set to 1 if epoch is complete, 0 otherwise
+ * @return MPI error code
+ */
+int ferrompi_win_test(int32_t win, int32_t* flag);
+
+/**
+ * Query the MPI PSCW assertion mode constants.
+ *
+ * Writes the three PSCW assertion constants into a 3-element array:
+ *   out[0] = MPI_MODE_NOCHECK
+ *   out[1] = MPI_MODE_NOSTORE
+ *   out[2] = MPI_MODE_NOPUT
+ *
+ * The values are implementation-defined and must be queried at runtime.
+ * Returns MPI_SUCCESS on MPI >= 3 builds, MPI_ERR_OTHER otherwise.
+ *
+ * @param out 3-element int32_t array to receive the constants
+ * @return MPI error code
+ */
+int ferrompi_win_pscw_mode_values(int32_t* out);
+
+/**
+ * One-sided write: copy data from a local origin buffer into a remote rank's
+ * window memory.
+ *
+ * Wraps MPI_Put. The operation completes when the surrounding epoch closes
+ * (fence, complete, or unlock). On MPI < 3 builds the stub returns
+ * MPI_ERR_OTHER.
+ *
+ * @param origin       Local origin buffer (read-only).
+ * @param origin_count Number of elements in the origin buffer.
+ * @param origin_dt_tag DatatypeTag for the origin element type.
+ * @param target_rank  Destination rank.
+ * @param target_disp  Displacement in units of the window's disp_unit.
+ * @param target_count Number of elements to write at the target.
+ * @param target_dt_tag DatatypeTag for the target element type.
+ * @param win_handle   Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_put(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle);
+
+/**
+ * Request-returning one-sided write: copy data from a local origin buffer into
+ * a remote rank's window memory and return a request handle for local-buffer
+ * completion tracking.
+ *
+ * Wraps MPI_Rput. The returned request completes when the local origin buffer
+ * is safe to reuse — NOT when the remote rank has observed the write. The
+ * remote completion still requires closing the surrounding epoch (fence,
+ * complete, or unlock). On MPI < 3 builds the stub returns MPI_ERR_OTHER.
+ *
+ * @param origin          Local origin buffer (read-only).
+ * @param origin_count    Number of elements in the origin buffer.
+ * @param origin_dt_tag   DatatypeTag for the origin element type.
+ * @param target_rank     Destination rank.
+ * @param target_disp     Displacement in units of the window's disp_unit.
+ * @param target_count    Number of elements to write at the target.
+ * @param target_dt_tag   DatatypeTag for the target element type.
+ * @param win_handle      Window handle.
+ * @param request_handle  Output: request table index for the new request.
+ * @return MPI error code (MPI_SUCCESS = 0), or MPI_ERR_OTHER if the request
+ *         table is exhausted.
+ */
+int ferrompi_rput(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle);
+
+/**
+ * One-sided read: copy data from a remote rank's window memory into a local
+ * origin buffer.
+ *
+ * Wraps MPI_Get. The operation completes when the surrounding epoch closes
+ * (fence, complete, or unlock). On MPI < 3 builds the stub returns
+ * MPI_ERR_OTHER.
+ *
+ * @param origin       Local destination buffer (write destination).
+ * @param origin_count Number of elements in the origin buffer.
+ * @param origin_dt_tag DatatypeTag for the origin element type.
+ * @param target_rank  Source rank.
+ * @param target_disp  Displacement in units of the window's disp_unit.
+ * @param target_count Number of elements to read from the target.
+ * @param target_dt_tag DatatypeTag for the target element type.
+ * @param win_handle   Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_get(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle);
+
+/**
+ * Request-returning one-sided read: copy data from a remote rank's window
+ * memory into a local origin buffer and return a request handle for
+ * local-buffer completion tracking.
+ *
+ * Wraps MPI_Rget. When the returned request completes (via MPI_Wait or
+ * equivalent), the data IS guaranteed to be in the local origin buffer —
+ * unlike Rput, no separate epoch-close is needed to observe the result
+ * locally. On MPI < 3 builds the stub returns MPI_ERR_OTHER.
+ *
+ * Note: calling MPI_Cancel on an Rget request is implementation-defined
+ * behavior and is discouraged by the MPI standard.
+ *
+ * @param origin          Local destination buffer (write destination).
+ * @param origin_count    Number of elements in the origin buffer.
+ * @param origin_dt_tag   DatatypeTag for the origin element type.
+ * @param target_rank     Source rank.
+ * @param target_disp     Displacement in units of the window's disp_unit.
+ * @param target_count    Number of elements to read from the target.
+ * @param target_dt_tag   DatatypeTag for the target element type.
+ * @param win_handle      Window handle.
+ * @param request_handle  Output: request table index for the new request.
+ * @return MPI error code (MPI_SUCCESS = 0), or MPI_ERR_OTHER if the request
+ *         table is exhausted.
+ */
+int ferrompi_rget(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle);
+
+/**
+ * One-sided reduce: combine data from a local origin buffer with a remote
+ * rank's window memory using a reduction operation.
+ *
+ * Wraps MPI_Accumulate. The operation completes when the surrounding epoch
+ * closes (fence, complete, or unlock). On MPI < 3 builds the stub returns
+ * MPI_ERR_OTHER.
+ *
+ * @param origin        Local origin buffer (read-only).
+ * @param origin_count  Number of elements in the origin buffer.
+ * @param origin_dt_tag DatatypeTag for the origin element type.
+ * @param target_rank   Destination rank.
+ * @param target_disp   Displacement in units of the window's disp_unit.
+ * @param target_count  Number of elements to accumulate at the target.
+ * @param target_dt_tag DatatypeTag for the target element type.
+ * @param op_tag        ReduceOp discriminant (0=Sum, 12=Replace, 13=NoOp, ...).
+ * @param win_handle    Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                        int32_t target_rank, int64_t target_disp, int64_t target_count,
+                        int32_t target_dt_tag, int32_t op_tag, int32_t win_handle);
+
+/**
+ * Request-returning one-sided reduce: combine data from a local origin buffer
+ * with a remote rank's window memory using a reduction operation, returning a
+ * Request handle that completes when the local origin buffer is safe to reuse.
+ *
+ * Wraps MPI_Raccumulate. Unlike MPI_Accumulate, local completion (i.e., the
+ * origin buffer being safe to reuse) is signaled by the returned Request
+ * rather than by the epoch boundary. Remote-side completion (visibility at the
+ * target) still requires the surrounding epoch to close (fence, complete, or
+ * unlock). On MPI < 3 builds the stub returns MPI_ERR_OTHER.
+ *
+ * @param origin         Local origin buffer (read-only).
+ * @param origin_count   Number of elements in the origin buffer.
+ * @param origin_dt_tag  DatatypeTag for the origin element type.
+ * @param target_rank    Destination rank.
+ * @param target_disp    Displacement in units of the window's disp_unit.
+ * @param target_count   Number of elements to accumulate at the target.
+ * @param target_dt_tag  DatatypeTag for the target element type.
+ * @param op_tag         ReduceOp discriminant (0=Sum, 12=Replace, 13=NoOp, ...).
+ * @param win_handle     Window handle.
+ * @param request_handle Output: opaque handle for the returned Request.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_raccumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                         int32_t target_rank, int64_t target_disp, int64_t target_count,
+                         int32_t target_dt_tag, int32_t op_tag, int32_t win_handle,
+                         int64_t* request_handle);
+
+/**
+ * Atomic read-modify-write: fetch the current target value into a local result
+ * buffer, then apply a reduction of the origin buffer onto the target — all
+ * atomically with respect to other RMA operations in the same epoch.
+ *
+ * Wraps MPI_Get_accumulate. The operation completes when the surrounding epoch
+ * closes (fence, complete, or unlock). On MPI < 3 builds the stub returns
+ * MPI_ERR_OTHER.
+ *
+ * @param origin         Local input buffer (read-only).
+ * @param origin_count   Number of elements in the origin buffer.
+ * @param origin_dt_tag  DatatypeTag for the origin element type.
+ * @param result         Local destination buffer for the pre-update target value.
+ * @param result_count   Number of elements in the result buffer.
+ * @param result_dt_tag  DatatypeTag for the result element type.
+ * @param target_rank    Target rank.
+ * @param target_disp    Displacement in units of the window's disp_unit.
+ * @param target_count   Number of elements to read-modify-write at the target.
+ * @param target_dt_tag  DatatypeTag for the target element type.
+ * @param op_tag         ReduceOp discriminant (0=Sum, 12=Replace, 13=NoOp, ...).
+ * @param win_handle     Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_get_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                            void* result, int64_t result_count, int32_t result_dt_tag,
+                            int32_t target_rank, int64_t target_disp, int64_t target_count,
+                            int32_t target_dt_tag, int32_t op_tag, int32_t win_handle);
+
+/**
+ * Single-element atomic fetch-and-update: read the current value at the
+ * target displacement into `result`, then apply `op(origin, target)` at the
+ * target — both atomically with respect to other RMA operations in the same
+ * epoch.
+ *
+ * Wraps MPI_Fetch_and_op. Restricted to predefined MPI datatypes only
+ * (no derived/custom datatypes). The operation completes when the surrounding
+ * epoch closes (fence, complete, or unlock). On MPI < 3 builds the stub
+ * returns MPI_ERR_OTHER.
+ *
+ * @param origin       Pointer to the single origin element (read-only).
+ * @param result       Pointer to a single-element output buffer for the
+ *                     pre-update target value.
+ * @param dt_tag       DatatypeTag for the element type (predefined only).
+ * @param target_rank  Target rank.
+ * @param target_disp  Displacement in units of the window's disp_unit.
+ * @param op_tag       ReduceOp discriminant (0=Sum, 12=Replace, 13=NoOp, ...).
+ * @param win_handle   Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_fetch_and_op(const void* origin, void* result, int32_t dt_tag,
+                          int32_t target_rank, int64_t target_disp,
+                          int32_t op_tag, int32_t win_handle);
+
+/**
+ * Atomic compare-and-swap on a remote window element.
+ *
+ * Wraps `MPI_Compare_and_swap`. Atomically reads the remote element at
+ * `(target_rank, target_disp)` into `result`, then conditionally replaces it
+ * with `origin` if the remote value equals `compare`. The returned `result`
+ * always holds the pre-CAS remote value regardless of whether the swap
+ * succeeded.
+ *
+ * Only predefined integer and byte datatypes are valid for CAS per MPI 4.1
+ * section 12.5.4 (`MPI_INT32_T`, `MPI_INT64_T`, `MPI_UINT32_T`,
+ * `MPI_UINT64_T`, `MPI_UINT8_T` / `MPI_BYTE`). The Rust layer enforces this
+ * at compile time via the `AtomicMpiDatatype` sealed trait.
+ *
+ * On MPI < 3 builds the function is present but returns `MPI_ERR_OTHER`.
+ *
+ * @param origin       Pointer to the new value to swap in if comparison succeeds.
+ * @param compare      Pointer to the expected current value.
+ * @param result       Pointer to a single-element output buffer for the
+ *                     pre-CAS target value.
+ * @param dt_tag       DatatypeTag for the element type (integer/byte types only).
+ * @param target_rank  Target rank.
+ * @param target_disp  Displacement in units of the window's disp_unit.
+ * @param win_handle   Window handle.
+ * @return MPI error code (MPI_SUCCESS = 0).
+ */
+int ferrompi_compare_and_swap(const void* origin, const void* compare, void* result,
+                               int32_t dt_tag, int32_t target_rank, int64_t target_disp,
+                               int32_t win_handle);
 
 /* ============================================================
  * Utility Functions
@@ -1503,6 +2066,91 @@ int ferrompi_irecv_custom(
     int32_t tag,
     int32_t comm,
     int64_t* request
+);
+
+/* ============================================================
+ * User-Defined Reduction Op (MPI_Op_create)
+ * ============================================================
+ *
+ * The op-slot table supports MAX_OPS (16) concurrently live UserOp
+ * instances.  Each slot is backed by a unique C trampoline function
+ * so that MPI_Op_create can associate a single closure to an op
+ * without needing a user-data side channel.
+ */
+
+/**
+ * Allocate a free slot in the op-slot table.
+ *
+ * On success, writes the slot index (0..MAX_OPS-1) to *out_slot and
+ * returns MPI_SUCCESS.  Returns MPI_ERR_OTHER if the table is full.
+ */
+int ferrompi_op_alloc_slot(int32_t* out_slot);
+
+/**
+ * Store the Rust fat-pointer (data + vtable) for the boxed closure
+ * into the given slot.  Must be called before ferrompi_op_create_user.
+ *
+ * Both pointers are the two halves of a Rust *mut dyn Fn(...) fat pointer,
+ * stored as void* to keep the C layer independent of Rust internals.
+ */
+void ferrompi_op_set_closure(int32_t slot, void* data, void* vtbl);
+
+/**
+ * Create an MPI_Op for the given slot.
+ *
+ * @param slot     Slot index returned by ferrompi_op_alloc_slot.
+ * @param commute  1 if the operation is commutative, 0 otherwise.
+ * @param out_handle Output: the handle (same as slot) to pass back to Rust.
+ * @return MPI error code.
+ */
+int ferrompi_op_create_user(int32_t slot, int32_t commute, int32_t* out_handle);
+
+/**
+ * Free the MPI_Op and release the slot.
+ *
+ * Drop ordering (ADR-0005 Decision 3):
+ *   1. MPI_Op_free  — MPI will not invoke the trampoline after this.
+ *   2. ferrompi_op_drop_closure (Rust callback) — drops the boxed closure.
+ *   3. free_op_slot — releases the C-side slot.
+ *
+ * @param handle  Slot/handle returned by ferrompi_op_create_user.
+ * @return MPI error code.
+ */
+int ferrompi_op_free(int32_t handle);
+
+/**
+ * Release the op slot WITHOUT calling MPI_Op_free.
+ *
+ * Use this in rollback paths where ferrompi_op_create_user failed and the
+ * slot holds MPI_OP_NULL.  Calling MPI_Op_free on MPI_OP_NULL is
+ * implementation-defined; this shim avoids it entirely.
+ *
+ * The caller must have already dropped the Rust closure before calling this.
+ * ferrompi_op_drop_closure is NOT invoked by this function.
+ *
+ * @param handle  Slot index allocated by ferrompi_op_alloc_slot.
+ * @return MPI_SUCCESS, or MPI_ERR_ARG if handle is out of range.
+ */
+int ferrompi_op_free_slot_only(int32_t handle);
+
+/**
+ * MPI_Allreduce using a user-defined reduction op.
+ *
+ * @param sendbuf       Send buffer.
+ * @param recvbuf       Receive buffer.
+ * @param count         Number of elements.
+ * @param datatype_tag  FERROMPI_* tag for the element type.
+ * @param op_handle     Slot handle returned by ferrompi_op_create_user.
+ * @param comm          Communicator handle.
+ * @return MPI error code.
+ */
+int ferrompi_allreduce_user_op(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op_handle,
+    int32_t comm
 );
 
 /* ============================================================

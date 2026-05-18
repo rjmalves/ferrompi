@@ -212,6 +212,11 @@ run_test test_custom_dt_struct 2
 run_test test_custom_dt_resized 2
 run_test test_custom_dt_p2p 2
 run_test test_mpi_from_group 4
+run_test test_user_op 4
+run_test test_persistent_p2p 2
+run_test test_persistent_rsend 2
+run_test test_persistent_ssend 2
+run_test test_persistent_bsend 2
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"
@@ -243,6 +248,20 @@ if [[ "$FEATURES" == *"rma"* ]] || [[ "$FEATURES" == *"numa"* ]]; then
     echo -e "${BOLD}Running RMA/shared memory tests${RESET}"
     echo -e "${BOLD}────────────────────────────────────────${RESET}"
     run_test test_rma_window
+    run_test test_rma_win_create 2
+    run_test test_rma_win_fence 2
+    run_test test_rma_win_pscw 2
+    run_test test_rma_win_lock 2
+    run_test test_rma_win_flush_sync 2
+    run_test test_rma_put 2
+    run_test test_rma_rput 2
+    run_test test_rma_rget 2
+    run_test test_rma_get 2
+    run_test test_rma_accumulate 2
+    run_test test_rma_raccumulate 2
+    run_test test_rma_get_accumulate 2
+    run_test test_rma_fetch_and_op 2
+    run_test test_rma_compare_and_swap 2
     run_test shared_memory
 fi
 

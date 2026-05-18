@@ -70,6 +70,19 @@ static MPI_Datatype datatype_table[MAX_DATATYPES];
 static int datatype_used[MAX_DATATYPES];  // 1 if slot is in use
 static int next_datatype_hint = 0;
 
+// Maximum number of concurrent user-defined MPI_Op objects
+#define MAX_OPS 16
+
+// User-defined op table (populated by ferrompi_op_create_user)
+static MPI_Op op_table[MAX_OPS];
+static atomic_int op_used[MAX_OPS];  // 1 if slot is in use
+static atomic_int next_op_hint;
+
+// Fat-pointer pairs for each registered Rust closure
+// (data pointer + vtable pointer of Box<dyn Fn(...)>)
+static void* op_closure_data[MAX_OPS];
+static void* op_closure_vtbl[MAX_OPS];
+
 // Initialize tables
 static int tables_initialized = 0;
 
@@ -102,6 +115,13 @@ static void init_tables(void) {
         datatype_table[i] = MPI_DATATYPE_NULL;
         datatype_used[i] = 0;
     }
+    for (int i = 0; i < MAX_OPS; i++) {
+        op_table[i] = MPI_OP_NULL;
+        atomic_init(&op_used[i], 0);
+        op_closure_data[i] = NULL;
+        op_closure_vtbl[i] = NULL;
+    }
+    atomic_init(&next_op_hint, 0);
     tables_initialized = 1;
 }
 
@@ -1953,6 +1973,255 @@ int ferrompi_ireduce_scatter_block(
 }
 
 /* ============================================================
+ * Persistent Point-to-Point (MPI 1.1+; enabled for MPI >= 3 per project policy)
+ * ============================================================ */
+
+#if MPI_VERSION >= 3
+
+int ferrompi_send_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Send_init(buf, (int)count, dt, dest, tag, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_recv_init(
+    void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t source,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int mpi_source = (source == -1) ? MPI_ANY_SOURCE : source;
+    int mpi_tag = (tag == -1) ? MPI_ANY_TAG : tag;
+
+    int ret = MPI_Recv_init(buf, (int)count, dt, mpi_source, mpi_tag, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_rsend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Rsend_init(buf, (int)count, dt, dest, tag, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+int ferrompi_ssend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Ssend_init(buf, (int)count, dt, dest, tag, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+#else /* MPI_VERSION < 3 */
+
+int ferrompi_send_init(
+    const void* buf, int64_t count, int32_t datatype_tag,
+    int32_t dest, int32_t tag, int32_t comm_handle, int64_t* request_handle
+) {
+    (void)buf; (void)count; (void)datatype_tag;
+    (void)dest; (void)tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_recv_init(
+    void* buf, int64_t count, int32_t datatype_tag,
+    int32_t source, int32_t tag, int32_t comm_handle, int64_t* request_handle
+) {
+    (void)buf; (void)count; (void)datatype_tag;
+    (void)source; (void)tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_rsend_init(
+    const void* buf, int64_t count, int32_t datatype_tag,
+    int32_t dest, int32_t tag, int32_t comm_handle, int64_t* request_handle
+) {
+    (void)buf; (void)count; (void)datatype_tag;
+    (void)dest; (void)tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_ssend_init(
+    const void* buf, int64_t count, int32_t datatype_tag,
+    int32_t dest, int32_t tag, int32_t comm_handle, int64_t* request_handle
+) {
+    (void)buf; (void)count; (void)datatype_tag;
+    (void)dest; (void)tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+#endif /* MPI_VERSION >= 3 */
+
+/* ============================================================
+ * Buffered Send Buffer Management and Persistent Buffered Send (MPI 1.1+)
+ * ============================================================ */
+
+#if MPI_VERSION >= 3
+
+/**
+ * Attach a user-provided buffer for use by buffered sends.
+ *
+ * MPI takes ownership of the buffer between attach and detach; the caller
+ * must not access it during that period. Only one buffer may be attached
+ * per process at a time. The `size` parameter is cast to int; buffers
+ * larger than INT_MAX bytes will silently truncate or return MPI_ERR_ARG
+ * depending on the MPI implementation.
+ *
+ * @param buffer  Pointer to the buffer (must be valid until detach)
+ * @param size    Size of the buffer in bytes (capped at INT_MAX)
+ * @return MPI error code
+ */
+int ferrompi_buffer_attach(void* buffer, int64_t size) {
+    return MPI_Buffer_attach(buffer, (int)size);
+}
+
+/**
+ * Detach the previously attached buffer.
+ *
+ * Blocks until all buffered sends using the buffer have completed.
+ * Writes the detached buffer pointer and its size back to the caller.
+ *
+ * @param buffer  Output: pointer to the detached buffer
+ * @param size    Output: size of the detached buffer in bytes
+ * @return MPI error code
+ */
+int ferrompi_buffer_detach(void** buffer, int64_t* size) {
+    int int_size = 0;
+    int ret = MPI_Buffer_detach(buffer, &int_size);
+    if (ret == MPI_SUCCESS) {
+        *size = (int64_t)int_size;
+    }
+    return ret;
+}
+
+int ferrompi_bsend_init(
+    const void* buf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t dest,
+    int32_t tag,
+    int32_t comm_handle,
+    int64_t* request_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+
+    int ret = MPI_Bsend_init(buf, (int)count, dt, dest, tag, comm, &req);
+
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+
+    return ret;
+}
+
+#else /* MPI_VERSION < 3 */
+
+int ferrompi_buffer_attach(void* buffer, int64_t size) {
+    (void)buffer; (void)size;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_buffer_detach(void** buffer, int64_t* size) {
+    (void)buffer; (void)size;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_bsend_init(
+    const void* buf, int64_t count, int32_t datatype_tag,
+    int32_t dest, int32_t tag, int32_t comm_handle, int64_t* request_handle
+) {
+    (void)buf; (void)count; (void)datatype_tag;
+    (void)dest; (void)tag; (void)comm_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+#endif /* MPI_VERSION >= 3 */
+
+/* ============================================================
  * Generic Persistent Collectives (MPI 4.0+)
  * ============================================================ */
 
@@ -3233,6 +3502,42 @@ int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_h
     return ret;
 }
 
+int ferrompi_win_create(void* base, int64_t size, int32_t disp_unit, int32_t info_handle,
+                         int32_t comm_handle, int32_t* win_handle) {
+    if (comm_handle < 0) return MPI_ERR_COMM;
+    MPI_Comm comm = get_comm(comm_handle);
+    if (comm == MPI_COMM_NULL) return MPI_ERR_COMM;
+    MPI_Info info = (info_handle < 0) ? MPI_INFO_NULL : get_info(info_handle);
+    MPI_Win win;
+    int ret = MPI_Win_create(base, (MPI_Aint)size, disp_unit, info, comm, &win);
+    if (ret == MPI_SUCCESS) {
+        *win_handle = alloc_win(win);
+        if (*win_handle < 0) {
+            MPI_Win_free(&win);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_win_allocate(int64_t size, int32_t disp_unit, int32_t info_handle,
+                           int32_t comm_handle, void** baseptr, int32_t* win_handle) {
+    if (comm_handle < 0) return MPI_ERR_COMM;
+    MPI_Comm comm = get_comm(comm_handle);
+    if (comm == MPI_COMM_NULL) return MPI_ERR_COMM;
+    MPI_Info info = (info_handle < 0) ? MPI_INFO_NULL : get_info(info_handle);
+    MPI_Win win;
+    int ret = MPI_Win_allocate((MPI_Aint)size, disp_unit, info, comm, baseptr, &win);
+    if (ret == MPI_SUCCESS) {
+        *win_handle = alloc_win(win);
+        if (*win_handle < 0) {
+            MPI_Win_free(&win);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
 int ferrompi_win_shared_query(int32_t win_handle, int32_t rank,
                                int64_t* size, int32_t* disp_unit, void** baseptr) {
     MPI_Win win = get_win(win_handle);
@@ -3259,6 +3564,14 @@ int ferrompi_win_fence(int32_t assert_val, int32_t win_handle) {
     MPI_Win win = get_win(win_handle);
     if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
     return MPI_Win_fence(assert_val, win);
+}
+
+int ferrompi_win_fence_mode_values(int32_t* out) {
+    out[0] = MPI_MODE_NOSTORE;
+    out[1] = MPI_MODE_NOPUT;
+    out[2] = MPI_MODE_NOPRECEDE;
+    out[3] = MPI_MODE_NOSUCCEED;
+    return MPI_SUCCESS;
 }
 
 int ferrompi_win_lock(int32_t lock_type, int32_t rank, int32_t assert_val, int32_t win_handle) {
@@ -3298,10 +3611,243 @@ int ferrompi_win_flush_all(int32_t win_handle) {
     return MPI_Win_flush_all(win);
 }
 
+int ferrompi_win_flush_local(int32_t rank, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_flush_local(rank, win);
+}
+
+int ferrompi_win_flush_local_all(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_flush_local_all(win);
+}
+
+int ferrompi_win_sync(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_sync(win);
+}
+
+int ferrompi_win_post(int32_t group_handle, int32_t assert_val, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Group group = get_group(group_handle);
+    if (group == MPI_GROUP_NULL) return MPI_ERR_GROUP;
+    return MPI_Win_post(group, assert_val, win);
+}
+
+int ferrompi_win_start(int32_t group_handle, int32_t assert_val, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Group group = get_group(group_handle);
+    if (group == MPI_GROUP_NULL) return MPI_ERR_GROUP;
+    return MPI_Win_start(group, assert_val, win);
+}
+
+int ferrompi_win_complete(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_complete(win);
+}
+
+int ferrompi_win_wait(int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    return MPI_Win_wait(win);
+}
+
+int ferrompi_win_test(int32_t win_handle, int32_t* flag) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    int mpi_flag = 0;
+    int ret = MPI_Win_test(win, &mpi_flag);
+    *flag = (int32_t)mpi_flag;
+    return ret;
+}
+
+int ferrompi_win_pscw_mode_values(int32_t* out) {
+    out[0] = MPI_MODE_NOCHECK;
+    out[1] = MPI_MODE_NOSTORE;
+    out[2] = MPI_MODE_NOPUT;
+    return MPI_SUCCESS;
+}
+
+int ferrompi_put(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    return MPI_Put(origin, (int)origin_count, origin_dt,
+                   target_rank, (MPI_Aint)target_disp, (int)target_count,
+                   target_dt, win);
+}
+
+int ferrompi_rput(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret = MPI_Rput(origin, (int)origin_count, origin_dt,
+                       target_rank, (MPI_Aint)target_disp, (int)target_count,
+                       target_dt, win, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_get(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    return MPI_Get(origin, (int)origin_count, origin_dt,
+                   target_rank, (MPI_Aint)target_disp, (int)target_count,
+                   target_dt, win);
+}
+
+int ferrompi_rget(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Request req;
+    int ret = MPI_Rget(origin, (int)origin_count, origin_dt,
+                       target_rank, (MPI_Aint)target_disp, (int)target_count,
+                       target_dt, win, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                        int32_t target_rank, int64_t target_disp, int64_t target_count,
+                        int32_t target_dt_tag, int32_t op_tag, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op_tag);
+    if (mpi_op == MPI_OP_NULL) return MPI_ERR_OP;
+    return MPI_Accumulate(origin, (int)origin_count, origin_dt,
+                          target_rank, (MPI_Aint)target_disp, (int)target_count,
+                          target_dt, mpi_op, win);
+}
+
+int ferrompi_raccumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                         int32_t target_rank, int64_t target_disp, int64_t target_count,
+                         int32_t target_dt_tag, int32_t op_tag, int32_t win_handle,
+                         int64_t* request_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op_tag);
+    if (mpi_op == MPI_OP_NULL) return MPI_ERR_OP;
+    MPI_Request req;
+    int ret = MPI_Raccumulate(origin, (int)origin_count, origin_dt,
+                              target_rank, (MPI_Aint)target_disp, (int)target_count,
+                              target_dt, mpi_op, win, &req);
+    if (ret == MPI_SUCCESS) {
+        *request_handle = alloc_request(req);
+        if (*request_handle < 0) {
+            MPI_Request_free(&req);
+            return MPI_ERR_OTHER;
+        }
+    }
+    return ret;
+}
+
+int ferrompi_get_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                            void* result, int64_t result_count, int32_t result_dt_tag,
+                            int32_t target_rank, int64_t target_disp, int64_t target_count,
+                            int32_t target_dt_tag, int32_t op_tag, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype origin_dt = get_datatype(origin_dt_tag);
+    if (origin_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype result_dt = get_datatype(result_dt_tag);
+    if (result_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Datatype target_dt = get_datatype(target_dt_tag);
+    if (target_dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op_tag);
+    if (mpi_op == MPI_OP_NULL) return MPI_ERR_OP;
+    return MPI_Get_accumulate(origin, (int)origin_count, origin_dt,
+                              result, (int)result_count, result_dt,
+                              target_rank, (MPI_Aint)target_disp, (int)target_count,
+                              target_dt, mpi_op, win);
+}
+
+int ferrompi_fetch_and_op(const void* origin, void* result, int32_t dt_tag,
+                          int32_t target_rank, int64_t target_disp,
+                          int32_t op_tag, int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype dt = get_datatype(dt_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    MPI_Op mpi_op = get_op(op_tag);
+    if (mpi_op == MPI_OP_NULL) return MPI_ERR_OP;
+    return MPI_Fetch_and_op(origin, result, dt, target_rank, (MPI_Aint)target_disp, mpi_op, win);
+}
+
+int ferrompi_compare_and_swap(const void* origin, const void* compare, void* result,
+                               int32_t dt_tag, int32_t target_rank, int64_t target_disp,
+                               int32_t win_handle) {
+    MPI_Win win = get_win(win_handle);
+    if (win == MPI_WIN_NULL) return MPI_ERR_WIN;
+    MPI_Datatype dt = get_datatype(dt_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    return MPI_Compare_and_swap(origin, compare, result, dt, target_rank,
+                                (MPI_Aint)target_disp, win);
+}
+
 #else /* MPI_VERSION < 3 */
 
 int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_handle,
                                   int32_t comm_handle, void** baseptr, int32_t* win_handle) {
+    (void)size; (void)disp_unit; (void)info_handle; (void)comm_handle; (void)baseptr; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_create(void* base, int64_t size, int32_t disp_unit, int32_t info_handle,
+                         int32_t comm_handle, int32_t* win_handle) {
+    (void)base; (void)size; (void)disp_unit; (void)info_handle; (void)comm_handle; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_allocate(int64_t size, int32_t disp_unit, int32_t info_handle,
+                           int32_t comm_handle, void** baseptr, int32_t* win_handle) {
     (void)size; (void)disp_unit; (void)info_handle; (void)comm_handle; (void)baseptr; (void)win_handle;
     return MPI_ERR_OTHER;
 }
@@ -3319,6 +3865,11 @@ int ferrompi_win_free(int32_t win_handle) {
 
 int ferrompi_win_fence(int32_t assert_val, int32_t win_handle) {
     (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_fence_mode_values(int32_t* out) {
+    (void)out;
     return MPI_ERR_OTHER;
 }
 
@@ -3349,6 +3900,133 @@ int ferrompi_win_flush(int32_t rank, int32_t win_handle) {
 
 int ferrompi_win_flush_all(int32_t win_handle) {
     (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_flush_local(int32_t rank, int32_t win_handle) {
+    (void)rank; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_flush_local_all(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_sync(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_post(int32_t group_handle, int32_t assert_val, int32_t win_handle) {
+    (void)group_handle; (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_start(int32_t group_handle, int32_t assert_val, int32_t win_handle) {
+    (void)group_handle; (void)assert_val; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_complete(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_wait(int32_t win_handle) {
+    (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_test(int32_t win_handle, int32_t* flag) {
+    (void)win_handle; (void)flag;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_win_pscw_mode_values(int32_t* out) {
+    (void)out;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_put(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_rput(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)win_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_get(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                 int32_t target_rank, int64_t target_disp, int64_t target_count,
+                 int32_t target_dt_tag, int32_t win_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_rget(void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                  int32_t target_rank, int64_t target_disp, int64_t target_count,
+                  int32_t target_dt_tag, int32_t win_handle, int64_t* request_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)win_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                        int32_t target_rank, int64_t target_disp, int64_t target_count,
+                        int32_t target_dt_tag, int32_t op_tag, int32_t win_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)op_tag; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_raccumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                         int32_t target_rank, int64_t target_disp, int64_t target_count,
+                         int32_t target_dt_tag, int32_t op_tag, int32_t win_handle,
+                         int64_t* request_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)op_tag; (void)win_handle; (void)request_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_get_accumulate(const void* origin, int64_t origin_count, int32_t origin_dt_tag,
+                            void* result, int64_t result_count, int32_t result_dt_tag,
+                            int32_t target_rank, int64_t target_disp, int64_t target_count,
+                            int32_t target_dt_tag, int32_t op_tag, int32_t win_handle) {
+    (void)origin; (void)origin_count; (void)origin_dt_tag;
+    (void)result; (void)result_count; (void)result_dt_tag;
+    (void)target_rank; (void)target_disp; (void)target_count;
+    (void)target_dt_tag; (void)op_tag; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_fetch_and_op(const void* origin, void* result, int32_t dt_tag,
+                          int32_t target_rank, int64_t target_disp,
+                          int32_t op_tag, int32_t win_handle) {
+    (void)origin; (void)result; (void)dt_tag;
+    (void)target_rank; (void)target_disp; (void)op_tag; (void)win_handle;
+    return MPI_ERR_OTHER;
+}
+
+int ferrompi_compare_and_swap(const void* origin, const void* compare, void* result,
+                               int32_t dt_tag, int32_t target_rank, int64_t target_disp,
+                               int32_t win_handle) {
+    (void)origin; (void)compare; (void)result; (void)dt_tag;
+    (void)target_rank; (void)target_disp; (void)win_handle;
     return MPI_ERR_OTHER;
 }
 
@@ -3661,6 +4339,217 @@ int ferrompi_irecv_custom(
     }
 
     return ret;
+}
+
+/* ============================================================
+ * User-Defined Reduction Op — Trampolines and Shims
+ *
+ * Strategy: per-op static slot table following the group_table /
+ * info_table pattern from ADR-0002.  MAX_OPS distinct trampoline
+ * functions are generated by the FERROMPI_DEFINE_OP_TRAMPOLINE macro
+ * so that MPI_Op_create receives a unique function pointer per slot,
+ * sidestepping the lack of a user-data parameter in the MPI user-
+ * function signature.
+ *
+ * Drop ordering (ADR-0005 Decision 3):
+ *   ferrompi_op_free → MPI_Op_free → ferrompi_op_drop_closure → free_op_slot
+ * This guarantees the Rust closure is alive for the full lifetime of
+ * the MPI_Op handle.
+ *
+ * The static tables (op_table, op_used, op_closure_data, op_closure_vtbl)
+ * are declared at the top of this file, alongside the other slot tables.
+ * ============================================================ */
+
+/* Forward declarations of C-invoked Rust callback and helper. */
+extern void rust_user_op_invoke(void* closure_data, void* closure_vtbl,
+                                void* invec, void* inoutvec,
+                                int len, int dt_tag);
+/* Called from ferrompi_op_free to drop the boxed Rust closure. */
+extern void ferrompi_op_drop_closure(int32_t slot);
+
+/* ---- slot helpers ---- */
+
+static int32_t alloc_op_slot(void) {
+    int hint = atomic_load_explicit(&next_op_hint, memory_order_relaxed);
+    for (int i = 0; i < MAX_OPS; i++) {
+        int idx = (hint + i) % MAX_OPS;
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &op_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            atomic_store_explicit(&next_op_hint, (idx + 1) % MAX_OPS,
+                                  memory_order_relaxed);
+            return (int32_t)idx;
+        }
+    }
+    return -1;  /* table full */
+}
+
+static void free_op_slot(int32_t slot) {
+    if (slot >= 0 && slot < MAX_OPS) {
+        op_table[slot] = MPI_OP_NULL;
+        op_closure_data[slot] = NULL;
+        op_closure_vtbl[slot] = NULL;
+        atomic_store_explicit(&op_used[slot], 0, memory_order_release);
+    }
+}
+
+/* Reverse-map an MPI_Datatype to a FERROMPI_* tag integer.
+ * Returns -1 if the datatype is not a known primitive. */
+static int ferrompi_tag_from_mpi_dt(MPI_Datatype dt) {
+    if (dt == MPI_FLOAT)           return FERROMPI_F32;
+    if (dt == MPI_DOUBLE)          return FERROMPI_F64;
+    if (dt == MPI_INT32_T)         return FERROMPI_I32;
+    if (dt == MPI_INT64_T)         return FERROMPI_I64;
+    if (dt == MPI_UINT8_T)         return FERROMPI_U8;
+    if (dt == MPI_UINT32_T)        return FERROMPI_U32;
+    if (dt == MPI_UINT64_T)        return FERROMPI_U64;
+    if (dt == MPI_FLOAT_INT)       return FERROMPI_FLOAT_INT;
+    if (dt == MPI_DOUBLE_INT)      return FERROMPI_DOUBLE_INT;
+    if (dt == MPI_LONG_INT)        return FERROMPI_LONG_INT;
+    if (dt == MPI_2INT)            return FERROMPI_2INT;
+    if (dt == MPI_SHORT_INT)       return FERROMPI_SHORT_INT;
+    if (dt == MPI_LONG_DOUBLE_INT) return FERROMPI_LONG_DOUBLE_INT;
+    if (dt == MPI_BYTE)            return FERROMPI_BYTE;
+    return -1;
+}
+
+/* Central dispatch — called by every trampoline. */
+static void ferrompi_invoke_user_op(int slot,
+                                     void* invec, void* inoutvec,
+                                     int* len, MPI_Datatype* dt) {
+    int dt_tag = ferrompi_tag_from_mpi_dt(*dt);
+    rust_user_op_invoke(op_closure_data[slot], op_closure_vtbl[slot],
+                        invec, inoutvec, *len, dt_tag);
+}
+
+/* ---- 16 distinct trampoline functions (ADR-0005 Decision 5) ---- */
+
+#define FERROMPI_DEFINE_OP_TRAMPOLINE(N)                              \
+static void ferrompi_user_op_trampoline_##N(                          \
+    void* invec, void* inoutvec, int* len, MPI_Datatype* dt) {        \
+    ferrompi_invoke_user_op(N, invec, inoutvec, len, dt);             \
+}
+
+FERROMPI_DEFINE_OP_TRAMPOLINE(0)
+FERROMPI_DEFINE_OP_TRAMPOLINE(1)
+FERROMPI_DEFINE_OP_TRAMPOLINE(2)
+FERROMPI_DEFINE_OP_TRAMPOLINE(3)
+FERROMPI_DEFINE_OP_TRAMPOLINE(4)
+FERROMPI_DEFINE_OP_TRAMPOLINE(5)
+FERROMPI_DEFINE_OP_TRAMPOLINE(6)
+FERROMPI_DEFINE_OP_TRAMPOLINE(7)
+FERROMPI_DEFINE_OP_TRAMPOLINE(8)
+FERROMPI_DEFINE_OP_TRAMPOLINE(9)
+FERROMPI_DEFINE_OP_TRAMPOLINE(10)
+FERROMPI_DEFINE_OP_TRAMPOLINE(11)
+FERROMPI_DEFINE_OP_TRAMPOLINE(12)
+FERROMPI_DEFINE_OP_TRAMPOLINE(13)
+FERROMPI_DEFINE_OP_TRAMPOLINE(14)
+FERROMPI_DEFINE_OP_TRAMPOLINE(15)
+
+/* Static table of trampoline pointers indexed by slot. */
+static MPI_User_function* const ferrompi_user_op_trampolines[MAX_OPS] = {
+    ferrompi_user_op_trampoline_0,
+    ferrompi_user_op_trampoline_1,
+    ferrompi_user_op_trampoline_2,
+    ferrompi_user_op_trampoline_3,
+    ferrompi_user_op_trampoline_4,
+    ferrompi_user_op_trampoline_5,
+    ferrompi_user_op_trampoline_6,
+    ferrompi_user_op_trampoline_7,
+    ferrompi_user_op_trampoline_8,
+    ferrompi_user_op_trampoline_9,
+    ferrompi_user_op_trampoline_10,
+    ferrompi_user_op_trampoline_11,
+    ferrompi_user_op_trampoline_12,
+    ferrompi_user_op_trampoline_13,
+    ferrompi_user_op_trampoline_14,
+    ferrompi_user_op_trampoline_15,
+};
+
+/* ---- Public shims called from Rust ---- */
+
+/* Allocate a free slot; writes slot index to *out_slot.
+ * Returns MPI_SUCCESS on success, MPI_ERR_OTHER if table is full. */
+int ferrompi_op_alloc_slot(int32_t* out_slot) {
+    int32_t slot = alloc_op_slot();
+    if (slot < 0) return MPI_ERR_OTHER;
+    *out_slot = slot;
+    return MPI_SUCCESS;
+}
+
+/* Register a Rust fat pointer (data+vtable) for the given slot.
+ * Must be called after ferrompi_op_alloc_slot and before
+ * ferrompi_op_create_user. */
+void ferrompi_op_set_closure(int32_t slot, void* data, void* vtbl) {
+    op_closure_data[slot] = data;
+    op_closure_vtbl[slot] = vtbl;
+}
+
+/* Create an MPI_Op for the given slot; commute=1 → commutative.
+ * Stores the MPI_Op in op_table[slot] and writes the slot back to
+ * *out_handle (callers use the slot as the handle). */
+int ferrompi_op_create_user(int32_t slot, int32_t commute, int32_t* out_handle) {
+    if (slot < 0 || slot >= MAX_OPS) return MPI_ERR_ARG;
+    MPI_Op op;
+    int ret = MPI_Op_create(ferrompi_user_op_trampolines[slot],
+                            (int)commute, &op);
+    if (ret != MPI_SUCCESS) return ret;
+    op_table[slot] = op;
+    *out_handle = slot;
+    return MPI_SUCCESS;
+}
+
+/* Free the MPI_Op for the given handle, drop the Rust closure, then
+ * clear the slot.  Drop ordering: MPI_Op_free first (ADR-0005 Decision 3). */
+int ferrompi_op_free(int32_t handle) {
+    if (handle < 0 || handle >= MAX_OPS) return MPI_ERR_ARG;
+    /* Step 1: MPI_Op_free — MPI will not invoke the trampoline after this. */
+    int ret = MPI_Op_free(&op_table[handle]);
+    /* Step 2: drop the Rust-boxed closure via the Rust callback. */
+    ferrompi_op_drop_closure(handle);
+    /* Step 3: reclaim the slot. */
+    free_op_slot(handle);
+    return ret;
+}
+
+/* Release the op slot WITHOUT calling MPI_Op_free.
+ *
+ * Used in rollback paths where ferrompi_op_create_user (MPI_Op_create) failed
+ * and the slot therefore holds MPI_OP_NULL.  Calling MPI_Op_free on
+ * MPI_OP_NULL is implementation-defined; this shim avoids it entirely.
+ *
+ * The caller is responsible for dropping the Rust closure before calling this
+ * function (ferrompi_op_drop_closure is NOT called here because the caller
+ * already reconstructed and dropped the Box directly). */
+int ferrompi_op_free_slot_only(int32_t handle) {
+    if (handle < 0 || handle >= MAX_OPS) return MPI_ERR_ARG;
+    free_op_slot(handle);
+    return MPI_SUCCESS;
+}
+
+/* MPI_Allreduce using a user-defined op identified by op_handle (slot). */
+int ferrompi_allreduce_user_op(
+    const void* sendbuf,
+    void* recvbuf,
+    int64_t count,
+    int32_t datatype_tag,
+    int32_t op_handle,
+    int32_t comm_handle
+) {
+    MPI_Comm comm = get_comm(comm_handle);
+    MPI_Datatype dt = get_datatype(datatype_tag);
+    if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (op_handle < 0 || op_handle >= MAX_OPS) return MPI_ERR_ARG;
+    MPI_Op op = op_table[op_handle];
+    if (op == MPI_OP_NULL) return MPI_ERR_OP;
+#if MPI_VERSION >= 4
+    if (count > INT_MAX) {
+        return MPI_Allreduce_c(sendbuf, recvbuf, (MPI_Count)count, dt, op, comm);
+    }
+#endif
+    return MPI_Allreduce(sendbuf, recvbuf, (int)count, dt, op, comm);
 }
 
 /* ============================================================
