@@ -186,12 +186,31 @@ impl PersistentRequest {
 }
 
 impl Drop for PersistentRequest {
+    /// Complete any in-flight operation, then free the persistent request handle.
+    ///
+    /// When `self.active` is `true` (i.e., `start()` was called but `wait()` has
+    /// not yet returned), this calls `MPI_Wait` before freeing the handle.
+    /// **`MPI_Wait` blocks** until the peer operation completes; if the peer is
+    /// unreachable, this deadlocks. This two-step sequence upholds the MPI
+    /// standard requirement that `MPI_Request_free` must not be called on an
+    /// active request.
+    ///
+    /// See ADR-0004 §"Drop behavior: wait before free" for the full rationale.
     fn drop(&mut self) {
         // If active, wait for completion first
         if self.active {
+            // SAFETY: self.handle is a valid MPI request handle registered in the
+            // C-side request table by the *_init constructor. self.active is true,
+            // so start() was called and MPI holds an in-flight operation on this
+            // handle. ferrompi_wait calls MPI_Wait which completes the operation
+            // and releases the handle's active state before request_free below.
             unsafe { ffi::ferrompi_wait(self.handle) };
         }
         // Free the persistent request
+        // SAFETY: self.handle is a valid persistent MPI request handle. If it was
+        // active, ferrompi_wait above has already completed the operation, so
+        // MPI_Request_free is safe to call. If it was inactive, no operation is
+        // in flight and MPI_Request_free is unconditionally safe on the handle.
         unsafe { ffi::ferrompi_request_free(self.handle) };
     }
 }

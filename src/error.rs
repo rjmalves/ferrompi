@@ -27,55 +27,79 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// These correspond to the standard MPI error classes defined by the MPI specification.
 /// The C layer calls `MPI_Error_class` to map an error code to one of these classes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MpiErrorClass {
     /// `MPI_SUCCESS` — no error
+    #[error("SUCCESS")]
     Success,
     /// `MPI_ERR_BUFFER` — invalid buffer pointer
+    #[error("ERR_BUFFER")]
     Buffer,
     /// `MPI_ERR_COUNT` — invalid count argument
+    #[error("ERR_COUNT")]
     Count,
     /// `MPI_ERR_TYPE` — invalid datatype argument
+    #[error("ERR_TYPE")]
     Type,
     /// `MPI_ERR_TAG` — invalid tag argument
+    #[error("ERR_TAG")]
     Tag,
     /// `MPI_ERR_COMM` — invalid communicator
+    #[error("ERR_COMM")]
     Comm,
     /// `MPI_ERR_RANK` — invalid rank
+    #[error("ERR_RANK")]
     Rank,
     /// `MPI_ERR_REQUEST` — invalid request handle
+    #[error("ERR_REQUEST")]
     Request,
     /// `MPI_ERR_ROOT` — invalid root
+    #[error("ERR_ROOT")]
     Root,
     /// `MPI_ERR_GROUP` — invalid group
+    #[error("ERR_GROUP")]
     Group,
     /// `MPI_ERR_OP` — invalid operation
+    #[error("ERR_OP")]
     Op,
     /// `MPI_ERR_TOPOLOGY` — invalid topology
+    #[error("ERR_TOPOLOGY")]
     Topology,
     /// `MPI_ERR_DIMS` — invalid dimension argument
+    #[error("ERR_DIMS")]
     Dims,
     /// `MPI_ERR_ARG` — invalid argument
+    #[error("ERR_ARG")]
     Arg,
     /// `MPI_ERR_UNKNOWN` — unknown error
+    #[error("ERR_UNKNOWN")]
     Unknown,
     /// `MPI_ERR_TRUNCATE` — message truncated
+    #[error("ERR_TRUNCATE")]
     Truncate,
     /// `MPI_ERR_OTHER` — other error
+    #[error("ERR_OTHER")]
     Other,
     /// `MPI_ERR_INTERN` — internal MPI error
+    #[error("ERR_INTERN")]
     Intern,
     /// `MPI_ERR_IN_STATUS` — error code is in status
+    #[error("ERR_IN_STATUS")]
     InStatus,
     /// `MPI_ERR_PENDING` — pending request
+    #[error("ERR_PENDING")]
     Pending,
     /// `MPI_ERR_WIN` — invalid window
+    #[error("ERR_WIN")]
     Win,
     /// `MPI_ERR_INFO` — invalid info object
+    #[error("ERR_INFO")]
     Info,
     /// `MPI_ERR_FILE` — invalid file handle
+    #[error("ERR_FILE")]
     File,
     /// Unrecognized error class from the MPI implementation
+    #[error("ERR_CLASS({0})")]
     Raw(i32),
 }
 
@@ -130,44 +154,27 @@ impl MpiErrorClass {
     }
 }
 
-impl std::fmt::Display for MpiErrorClass {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MpiErrorClass::Success => write!(f, "SUCCESS"),
-            MpiErrorClass::Buffer => write!(f, "ERR_BUFFER"),
-            MpiErrorClass::Count => write!(f, "ERR_COUNT"),
-            MpiErrorClass::Type => write!(f, "ERR_TYPE"),
-            MpiErrorClass::Tag => write!(f, "ERR_TAG"),
-            MpiErrorClass::Comm => write!(f, "ERR_COMM"),
-            MpiErrorClass::Rank => write!(f, "ERR_RANK"),
-            MpiErrorClass::Request => write!(f, "ERR_REQUEST"),
-            MpiErrorClass::Root => write!(f, "ERR_ROOT"),
-            MpiErrorClass::Group => write!(f, "ERR_GROUP"),
-            MpiErrorClass::Op => write!(f, "ERR_OP"),
-            MpiErrorClass::Topology => write!(f, "ERR_TOPOLOGY"),
-            MpiErrorClass::Dims => write!(f, "ERR_DIMS"),
-            MpiErrorClass::Arg => write!(f, "ERR_ARG"),
-            MpiErrorClass::Unknown => write!(f, "ERR_UNKNOWN"),
-            MpiErrorClass::Truncate => write!(f, "ERR_TRUNCATE"),
-            MpiErrorClass::Other => write!(f, "ERR_OTHER"),
-            MpiErrorClass::Intern => write!(f, "ERR_INTERN"),
-            MpiErrorClass::InStatus => write!(f, "ERR_IN_STATUS"),
-            MpiErrorClass::Pending => write!(f, "ERR_PENDING"),
-            MpiErrorClass::Win => write!(f, "ERR_WIN"),
-            MpiErrorClass::Info => write!(f, "ERR_INFO"),
-            MpiErrorClass::File => write!(f, "ERR_FILE"),
-            MpiErrorClass::Raw(c) => write!(f, "ERR_CLASS({c})"),
-        }
+fn fmt_mpi(
+    class: &MpiErrorClass,
+    code: &i32,
+    message: &str,
+    operation: &Option<&'static str>,
+) -> String {
+    match operation {
+        Some(op) => format!("MPI error in {op}: {message} (class={class}, code={code})"),
+        None => format!("MPI error: {message} (class={class}, code={code})"),
     }
 }
 
 /// Error types for MPI operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// MPI has already been initialized.
+    #[error("MPI has already been initialized")]
     AlreadyInitialized,
 
     /// MPI error with class, code, descriptive message, and optional operation name.
+    #[error("{}", fmt_mpi(.class, .code, .message, .operation))]
     Mpi {
         /// The error class (category of error).
         class: MpiErrorClass,
@@ -180,47 +187,22 @@ pub enum Error {
     },
 
     /// Invalid buffer provided (e.g., send/recv buffer size mismatch).
+    #[error("Invalid buffer")]
     InvalidBuffer,
 
     /// Invalid reduction operation for the method being called
     /// (e.g., passing a non-MAXLOC/MINLOC op to `allreduce_indexed`).
+    #[error("Invalid reduction operation for this method")]
     InvalidOp,
 
     /// Operation not supported (e.g., MPI 4.0 persistent collectives on older MPI).
+    #[error("Operation not supported: {0}")]
     NotSupported(String),
 
     /// Internal ferrompi error.
+    #[error("Internal error: {0}")]
     Internal(String),
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::AlreadyInitialized => write!(f, "MPI has already been initialized"),
-            Error::Mpi {
-                class,
-                code,
-                message,
-                operation: Some(op),
-            } => write!(
-                f,
-                "MPI error in {op}: {message} (class={class}, code={code})"
-            ),
-            Error::Mpi {
-                class,
-                code,
-                message,
-                operation: None,
-            } => write!(f, "MPI error: {message} (class={class}, code={code})"),
-            Error::InvalidBuffer => write!(f, "Invalid buffer"),
-            Error::InvalidOp => write!(f, "Invalid reduction operation for this method"),
-            Error::NotSupported(s) => write!(f, "Operation not supported: {s}"),
-            Error::Internal(s) => write!(f, "Internal error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl Error {
     /// Create a structured error from an MPI error code.

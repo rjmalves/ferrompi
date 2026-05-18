@@ -263,6 +263,7 @@ name = "test_persistent_bsend"
 path = "examples/test_persistent_bsend.rs"
 
 [dependencies]
+thiserror = "2"
 
 [build-dependencies]
 cc = "1.2"

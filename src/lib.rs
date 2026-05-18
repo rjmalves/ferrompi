@@ -63,7 +63,28 @@
 //!   `allreduce_inplace`, `scan_scalar`, `exscan_scalar`
 //! - **Point-to-point**: `send`, `recv`, `isend`, `irecv`, `sendrecv`, `probe`, `iprobe`
 //! - **Communicator management**: `split`, `split_type`, `split_shared`, `duplicate`
-//! - **Shared memory windows** (feature `rma`): [`SharedWindow<T>`] with RAII lock guards
+//! - **Group operations**: [`Group`] with incl/excl/union/intersection/difference,
+//!   [`RankRange`] for range constructors, [`GroupComparison`].
+//!
+//!   Note: [`Mpi::create_from_group`] requires MPI 4.0+.
+//!   Support is probed once and cached; see the function rustdoc for the cache invariant.
+//! - **Custom datatypes**: [`CustomDatatype`]
+//!   (contiguous/vector/struct/resized) and [`StructField`]
+//!   for struct-type builders.
+//! - **User-defined reduction operations**: [`UserOp`] wraps `MPI_Op_create`
+//!   with safe closure storage and trampoline.
+//! - **Distributed RMA windows** (feature `rma`): [`Win<T>`](crate::Win) with
+//!   [`WinFenceAssert`], [`WinPscwAssert`],
+//!   [`WinLockGuard`], and [`WinLockAllGuard`]
+//!   RAII guards.
+//! - **Info objects**: [`Info`] for runtime hint passing to communicator,
+//!   window, and operation constructors.
+//! - **Persistent point-to-point**: `send_init`, `bsend_init`, `rsend_init`, `ssend_init`,
+//!   `recv_init` methods on [`Communicator`], each returning a
+//!   [`PersistentRequest`].
+//! - **Shared memory windows** (feature `rma`): [`SharedWindow<T>`](crate::SharedWindow)
+//!   with RAII lock guards for NUMA-aware intra-node shared memory (distinct from the
+//!   distributed [`Win<T>`](crate::Win) windows above).
 //! - **SLURM helpers** (feature `numa`): Job topology queries via `slurm` module
 //! - **Rich error handling**: [`MpiErrorClass`] categorization with messages from the MPI runtime
 //!
@@ -93,6 +114,26 @@
 //! [`Mpi`] itself is `!Send + !Sync` — MPI initialization and finalization
 //! must occur on the same thread. Only [`Communicator`] handles (and the
 //! operations on them) may cross thread boundaries.
+//!
+//! ### Send/Sync Status of Public Types
+//!
+//! | Type | Send/Sync | Notes |
+//! |------|-----------|-------|
+//! | [`Communicator`] | `Send + Sync` | Explicit `unsafe impl` in `src/comm/mod.rs`; cross-thread use is the primary hybrid MPI use case. |
+//! | [`Mpi`] | `!Send + !Sync` | `PhantomData<*const ()>` field; init and finalize must occur on the same thread. |
+//! | [`Group`] | `Send + Sync` | Explicit `unsafe impl` in `src/group.rs`; handles are opaque integers, MPI-thread-safe under `MPI_THREAD_MULTIPLE`. |
+//! | [`Request`] | `Send + Sync` | Auto-derived; `i64` + `bool` fields. Cross-thread use requires `MPI_THREAD_MULTIPLE`. Buffer-lifetime invariant still applies. |
+//! | [`PersistentRequest`] | `Send + Sync` | Auto-derived; same shape as `Request`. ADR-0004 §"Drop behavior" applies across thread boundaries. |
+//! | [`Status`] | `Send + Sync` | POD wrapper; all fields are `Copy`. |
+//! | [`CustomDatatype`] | `Send + Sync` | Explicit `unsafe impl` in `src/datatype_builder.rs`; handle is an opaque integer. |
+//! | [`Info`] | `Send + Sync` | Auto-derived from `i32` + `bool` fields; MPI info objects are thread-safe under `MPI_THREAD_MULTIPLE`. |
+//! | [`UserOp<T>`] | `Send + Sync` (for `T: MpiDatatype`) | Auto-derived: fields are `i32` + `PhantomData<T>`. The trait bound `MpiDatatype: Copy + Send + 'static` and the fact that all concrete `MpiDatatype` impls are also `Sync` give `Send + Sync` for `UserOp<T>`. The global closure registry uses internal `unsafe impl Send/Sync` on its slots; that is a separate object from `UserOp<T>` itself. |
+//! | [`Win<T>`](crate::Win) (feature `rma`) | `!Send + !Sync` | `NonNull<T>` field suppresses auto-traits; RMA window's local memory pointer is not safe to share across threads. |
+//! | [`SharedWindow<T>`](crate::SharedWindow) (feature `rma`) | `!Send + !Sync` | `NonNull<T>` field; same rationale as `Win<T>`. |
+//! | [`LockGuard<'a, T>`](crate::LockGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
+//! | [`LockAllGuard<'a, T>`](crate::LockAllGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
+//! | [`WinLockGuard<'g, 'a, T>`](crate::WinLockGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
+//! | [`WinLockAllGuard<'g, 'a, T>`](crate::WinLockAllGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
 //!
 //! ## Hybrid MPI+OpenMP
 //!

@@ -359,6 +359,10 @@ impl Communicator {
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T (Rust borrow rules
+            // prevent aliasing). T::TAG matches T's MPI datatype per ADR-0003. The caller must
+            // keep `data` alive for the entire lifetime of the returned PersistentRequest
+            // (including all start/wait cycles) per ADR-0004 §"Buffer-lifetime invariant".
             ffi::ferrompi_bcast_init(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -401,6 +405,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive for
+            // the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant".
             ffi::ferrompi_allreduce_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -425,6 +434,10 @@ impl Communicator {
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T. MPI uses it as both
+            // send (MPI_IN_PLACE) and receive buffer. T::TAG matches T's MPI datatype per ADR-0003.
+            // `data` must remain alive for the entire lifetime of the returned PersistentRequest
+            // per ADR-0004 §"Buffer-lifetime invariant".
             ffi::ferrompi_allreduce_init_inplace(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -476,6 +489,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive for
+            // the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant". recv is ignored by MPI at non-root.
             ffi::ferrompi_reduce_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -502,6 +520,11 @@ impl Communicator {
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). recv is ignored by MPI at non-root.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive for
+            // the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant".
             ffi::ferrompi_gather_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -550,6 +573,10 @@ impl Communicator {
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice (ignored by MPI at non-root) and recv is a
+            // valid exclusive slice of T; they cannot alias (Rust borrow rules). T::TAG matches
+            // T's MPI datatype per ADR-0003. Both slices must remain alive for the entire
+            // lifetime of the returned PersistentRequest per ADR-0004 §"Buffer-lifetime invariant".
             ffi::ferrompi_scatter_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.len() as i64,
@@ -596,6 +623,10 @@ impl Communicator {
     ) -> Result<PersistentRequest> {
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices must remain alive for the entire lifetime of the returned
+            // PersistentRequest per ADR-0004 §"Buffer-lifetime invariant".
             ffi::ferrompi_allgather_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -646,6 +677,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive for
+            // the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant".
             ffi::ferrompi_scan_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -696,6 +732,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive for
+            // the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant". Note: MPI leaves recv undefined on rank 0.
             ffi::ferrompi_exscan_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -750,6 +791,11 @@ impl Communicator {
         let count_per_rank = send.len() / size;
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() and divisibility
+            // by size are both verified above. T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices must remain alive for the entire lifetime of the returned
+            // PersistentRequest per ADR-0004 §"Buffer-lifetime invariant".
             ffi::ferrompi_alltoall_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 count_per_rank as i64,
@@ -802,6 +848,11 @@ impl Communicator {
         }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() * size is verified
+            // above. T::TAG matches T's MPI datatype per ADR-0003. Both slices must remain alive
+            // for the entire lifetime of the returned PersistentRequest per ADR-0004
+            // §"Buffer-lifetime invariant".
             ffi::ferrompi_reduce_scatter_block_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),

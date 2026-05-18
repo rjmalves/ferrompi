@@ -62,6 +62,11 @@ impl Communicator {
         if recvcounts.len() != displs.len() {
             return Err(Error::InvalidBuffer);
         }
+        // SAFETY: send is a valid slice of T with send.len() elements; recv is a valid
+        // mutable slice of T. recvcounts and displs are valid integer slices of equal
+        // length (guaranteed by the guard above). T::TAG matches T's MPI datatype per
+        // the MpiDatatype trait contract (ADR-0003). self.handle is owned by self and
+        // was validated by Communicator::from_handle. All slices outlive the call.
         let ret = unsafe {
             ffi::ferrompi_gatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -125,6 +130,12 @@ impl Communicator {
         if sendcounts.len() != displs.len() {
             return Err(Error::InvalidBuffer);
         }
+        // SAFETY: send is a valid read-only slice of T (MPI standard: sendcounts/displs
+        // are only significant at root, and non-root ranks pass null in the C shim; the
+        // Rust borrow checker ensures no aliasing between send and recv). recv is a valid
+        // mutable slice of T with recv.len() elements. sendcounts and displs are valid
+        // integer slices of equal length (guaranteed by the guard above). T::TAG matches
+        // T's MPI datatype per ADR-0003. self.handle is owned by self.
         let ret = unsafe {
             ffi::ferrompi_scatterv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -186,6 +197,11 @@ impl Communicator {
         if recvcounts.len() != displs.len() {
             return Err(Error::InvalidBuffer);
         }
+        // SAFETY: send and recv are disjoint slices enforced by Rust borrow semantics
+        // (&[T] and &mut [T]). recvcounts and displs have equal length (guard above),
+        // and the C shim reads exactly comm.size() elements from each — the guard
+        // ensures the arrays are long enough. T::TAG matches T's MPI datatype per
+        // ADR-0003. self.handle is owned by self and was validated by from_handle.
         let ret = unsafe {
             ffi::ferrompi_allgatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -249,6 +265,11 @@ impl Communicator {
         if sendcounts.len() != sdispls.len() || recvcounts.len() != rdispls.len() {
             return Err(Error::InvalidBuffer);
         }
+        // SAFETY: send and recv are disjoint slices (Rust borrow rules). sendcounts and
+        // sdispls have equal length; recvcounts and rdispls have equal length (both
+        // guaranteed by the guard above). All four displacement/count arrays are valid
+        // read-only pointers for the duration of the call. T::TAG matches T's MPI
+        // datatype per ADR-0003. self.handle is owned by self.
         let ret = unsafe {
             ffi::ferrompi_alltoallv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -316,6 +337,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send is a valid slice of T with send.len() elements; recv is a valid
+        // mutable slice of T. recvcounts and displs are valid integer slices of equal
+        // length (guaranteed by the guard above). Caller must keep send and recv alive
+        // until the returned Request is waited on (buffer-lifetime invariant). T::TAG
+        // matches T's MPI datatype per ADR-0003. self.handle is owned by self.
         let ret = unsafe {
             ffi::ferrompi_igatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -381,6 +407,12 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send is a valid read-only slice; recv is a valid mutable slice.
+        // sendcounts and displs are valid integer slices of equal length (guard above).
+        // On non-root ranks, MPI treats send/sendcounts/displs as insignificant — the
+        // Rust borrow prevents aliasing with recv. Caller must keep all slices alive
+        // until the returned Request is waited on. T::TAG per ADR-0003. self.handle
+        // is owned by self and was validated by Communicator::from_handle.
         let ret = unsafe {
             ffi::ferrompi_iscatterv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -444,6 +476,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send and recv are disjoint slices (Rust borrow rules). recvcounts and
+        // displs have equal length (guard above); the C shim reads exactly comm.size()
+        // elements from each. Caller must keep all slices alive until the returned
+        // Request is waited on (buffer-lifetime invariant). T::TAG per ADR-0003.
+        // self.handle is owned by self and was validated by Communicator::from_handle.
         let ret = unsafe {
             ffi::ferrompi_iallgatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -509,6 +546,12 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send and recv are disjoint slices (Rust borrow rules). sendcounts and
+        // sdispls have equal length; recvcounts and rdispls have equal length (both
+        // guaranteed by the guard above). All four arrays are valid read-only pointers
+        // for the duration of the in-flight operation. Caller must keep all slices alive
+        // until the returned Request is waited on. T::TAG per ADR-0003. self.handle is
+        // owned by self and was validated by Communicator::from_handle.
         let ret = unsafe {
             ffi::ferrompi_ialltoallv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -571,6 +614,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send and recv are valid slices of T; recvcounts and displs have equal
+        // length (guard above). Per ADR-0004 §"V-variant buffers", all three pointer
+        // arrays (data buffer, counts, displacements) must remain valid for the entire
+        // lifetime of the returned PersistentRequest, not just until wait(). T::TAG per
+        // ADR-0003. self.handle is owned by self and was validated by from_handle.
         let ret = unsafe {
             ffi::ferrompi_gatherv_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -629,6 +677,12 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send is a valid read-only slice; recv is a valid mutable slice.
+        // sendcounts and displs have equal length (guard above). Per ADR-0004 §"V-variant
+        // buffers", all three pointer arrays must remain valid for the full lifetime of
+        // the returned PersistentRequest. On non-root ranks, MPI ignores send/sendcounts/
+        // displs; the Rust borrow ensures no aliasing between send and recv. T::TAG per
+        // ADR-0003. self.handle is owned by self.
         let ret = unsafe {
             ffi::ferrompi_scatterv_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -685,6 +739,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send and recv are disjoint slices (Rust borrow rules). recvcounts and
+        // displs have equal length (guard above). Per ADR-0004 §"V-variant buffers", all
+        // three pointer arrays (data buffer, counts, displacements) must remain valid for
+        // the full lifetime of the returned PersistentRequest. T::TAG per ADR-0003.
+        // self.handle is owned by self and was validated by Communicator::from_handle.
         let ret = unsafe {
             ffi::ferrompi_allgatherv_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -749,6 +808,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let mut request_handle: i64 = 0;
+        // SAFETY: send and recv are disjoint slices (Rust borrow rules). sendcounts and
+        // sdispls have equal length; recvcounts and rdispls have equal length (both
+        // guaranteed by the guard above). Per ADR-0004 §"V-variant buffers", all six
+        // pointer arrays must remain valid for the full lifetime of the returned
+        // PersistentRequest. T::TAG per ADR-0003. self.handle is owned by self.
         let ret = unsafe {
             ffi::ferrompi_alltoallv_init(
                 send.as_ptr().cast::<std::ffi::c_void>(),

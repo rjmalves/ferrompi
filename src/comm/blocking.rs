@@ -18,6 +18,9 @@ impl Communicator {
     /// will return until all processes have entered the barrier.
     #[inline]
     pub fn barrier(&self) -> Result<()> {
+        // SAFETY: self.handle is a valid communicator handle registered in the C-side
+        // communicator table. ferrompi_barrier delegates to MPI_Barrier which requires no
+        // buffers; only a valid communicator handle is needed.
         let ret = unsafe { ffi::ferrompi_barrier(self.handle) };
         Error::check_with_op(ret, "barrier")
     }
@@ -48,6 +51,10 @@ impl Communicator {
     #[inline]
     pub fn broadcast<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T (Rust borrow rules
+            // prevent any aliasing). cast to *mut c_void is the standard FFI convention for
+            // passing typed buffers to C. T::TAG matches T's MPI datatype per ADR-0003.
+            // The slice outlives the blocking call.
             ffi::ferrompi_bcast(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -89,6 +96,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() is verified above.
+            // cast to *const/*mut c_void is the standard FFI convention. T::TAG matches T's MPI
+            // datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_reduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -166,6 +177,10 @@ impl Communicator {
     ) -> Result<()> {
         let is_root = if self.rank() == root { 1i32 } else { 0i32 };
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T. At root,
+            // MPI uses it as both send and receive buffer (MPI_IN_PLACE semantics);
+            // at non-root it is the send buffer only. T::TAG matches T's MPI datatype
+            // per ADR-0003. The slice outlives this blocking call.
             ffi::ferrompi_reduce_inplace(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -208,6 +223,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() is verified above.
+            // cast to *const/*mut c_void is the standard FFI convention. T::TAG matches T's MPI
+            // datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_allreduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -233,6 +252,9 @@ impl Communicator {
     /// ```
     pub fn allreduce_inplace<T: MpiDatatype>(&self, data: &mut [T], op: ReduceOp) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T (no aliasing via
+            // Rust borrow rules). MPI uses it as both send (MPI_IN_PLACE) and receive buffer.
+            // T::TAG matches T's MPI datatype per ADR-0003. The slice outlives this blocking call.
             ffi::ferrompi_allreduce_inplace(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -259,7 +281,7 @@ impl Communicator {
     /// ```
     pub fn allreduce_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp) -> Result<T> {
         let send = [value];
-        // SAFETY: T is Copy, so zero-init is safe for numeric types
+        // T is Copy, so zero-init is safe for numeric types.
         let mut recv = [value]; // placeholder, will be overwritten
         self.allreduce(&send, &mut recv, op)?;
         Ok(recv[0])
@@ -311,6 +333,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. op.raw_handle() is a valid MPI_Op
+            // registered by UserOp::new and kept alive for the lifetime of `op`. Both slices
+            // outlive this blocking call.
             ffi::ferrompi_allreduce_user_op(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -383,6 +410,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T
+            // (T: MpiIndexedDatatype — one of the six predefined MPI paired types). They cannot
+            // alias (Rust borrow rules). send.len() == recv.len() verified above. op has been
+            // validated to be MaxLoc or MinLoc, which are the only valid ops for indexed types.
+            // T::TAG matches T's MPI paired datatype per ADR-0003. Slices outlive this call.
             ffi::ferrompi_allreduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -515,6 +547,9 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_scan(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -565,6 +600,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking
+            // call. Note: MPI leaves recv undefined on rank 0, which is documented above.
             ffi::ferrompi_exscan(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -649,6 +688,9 @@ impl Communicator {
     /// ```
     pub fn gather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). At non-root, recv is ignored by MPI.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_gather(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -676,6 +718,9 @@ impl Communicator {
     /// ```
     pub fn allgather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices outlive this blocking call.
             ffi::ferrompi_allgather(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -939,6 +984,9 @@ impl Communicator {
     /// ```
     pub fn scatter<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice (ignored by MPI at non-root) and recv is a
+            // valid exclusive slice of T; they cannot alias (Rust borrow rules). T::TAG matches
+            // T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_scatter(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.len() as i64,
@@ -984,6 +1032,10 @@ impl Communicator {
         }
         let count = (send.len() / size) as i64;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() and divisibility
+            // by size are both verified above. T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices outlive this blocking call.
             ffi::ferrompi_alltoall(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 count,
@@ -1032,6 +1084,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() * size is verified
+            // above. T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this
+            // blocking call.
             ffi::ferrompi_reduce_scatter_block(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),

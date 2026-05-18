@@ -374,6 +374,32 @@ not propagatable). This is an accepted trade-off: if `MPI_Wait` fails inside `Dr
 `MPI_Request_free` still runs, ensuring the slot is released. The failure is effectively
 swallowed, which is consistent with Rust's convention that `Drop` must not panic.
 
+### Drop behavior for nonblocking `Request`
+
+`Drop for Request` calls `ferrompi_wait(self.handle)` (which invokes `MPI_Wait`) when
+`self.completed == false`. The call blocks until the peer posts the matching send or
+receive operation.
+
+**If the peer is unreachable — for example, because an error path returned early and the
+peer is waiting on a different message — `MPI_Wait` will block indefinitely, deadlocking
+the calling process.** This is not a bug in ferrompi; it is the expected MPI behavior
+when a request is not matched.
+
+The rationale for blocking over alternatives:
+
+- **Blocking is preferred to leaking the handle.** Returning from `Drop` without calling
+  `MPI_Wait` would leave the request slot occupied in the C-side request table, exhausting
+  the table capacity after enough leaked drops.
+- **Blocking is preferred to `MPI_Cancel`.** `MPI_Cancel` is unreliable for send
+  operations: the MPI standard permits an implementation to complete the send anyway,
+  ignoring the cancel request. A cancel-then-wait sequence would not reliably prevent the
+  peer from receiving unexpected data, and the error path handling becomes more complex
+  (see `src/request.rs` for the cancel comment).
+
+The future evolution path: a `MPI_Cancel`-then-`MPI_Wait`-with-timeout approach is being
+considered to make `Drop` non-blocking on error paths. This is out of scope for v0.4.1
+and planned for v0.5.
+
 ### Buffer-lifetime invariant: documented in SAFETY comments
 
 Each `*_init` constructor carries a `// SAFETY:` comment documenting that the caller

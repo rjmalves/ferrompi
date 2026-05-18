@@ -20,6 +20,25 @@ use crate::ffi;
 /// This cannot currently be enforced by the Rust type system because `Request`
 /// does not carry a lifetime parameter tying it to the buffers.
 ///
+/// # Drop Behavior
+///
+/// **Dropping a `Request` before calling `wait()` will call `MPI_Wait` inside
+/// `Drop`, which blocks until the peer operation completes.** If the peer never
+/// posts a matching send or receive, the drop call deadlocks permanently.
+///
+/// This is intentional: blocking in `Drop` is preferred over leaking the MPI
+/// request handle or silently cancelling the operation (see
+/// [`doc::adr_0004_persistent_collective_approach`](crate::doc::adr_0004_persistent_collective_approach)
+/// for the rationale).
+///
+/// **On any code path that may bypass `wait()` — including early returns via `?`,
+/// `break`, or a panic unwind — prefer calling `wait()` or `test()` explicitly
+/// so that failure modes remain observable.** See also the migration guide note
+/// in [`doc::migrating_from_rsmpi`](crate::doc::migrating_from_rsmpi).
+///
+/// A `MPI_Cancel`-then-`MPI_Wait`-with-timeout approach to make drop non-blocking
+/// is under consideration and planned for v0.5.
+///
 /// # Example
 ///
 /// ```no_run
@@ -326,10 +345,26 @@ impl Request {
 }
 
 impl Drop for Request {
+    /// Block until the in-flight operation completes, then release the handle.
+    ///
+    /// Calls `MPI_Wait` on the underlying request handle when `self.completed`
+    /// is `false`. **This call blocks** until the peer posts the matching
+    /// operation; if the peer never does, this deadlocks.
+    ///
+    /// Maintainers: the `self.completed = true` assignment in `Request::wait`
+    /// is the only guard that prevents a double-wait here. Any refactoring of
+    /// `wait()` must preserve that assignment, or this `Drop` impl becomes
+    /// unsound (double-freeing the request handle).
+    ///
+    /// The `MPI_Cancel`-then-`MPI_Wait`-with-timeout alternative is deferred
+    /// to v0.5 (see ADR-0004 §"Drop behavior for nonblocking Request").
     fn drop(&mut self) {
         if !self.completed {
-            // If the request wasn't waited on, we need to wait now to avoid
-            // leaving the operation in an undefined state
+            // SAFETY: self.handle is a valid MPI request handle registered in the
+            // C-side request table by the nonblocking constructor (e.g., iallreduce).
+            // The handle has not been freed because self.completed is false, meaning
+            // wait() was never called. ferrompi_wait calls MPI_Wait which frees the
+            // handle on success; the completed flag guards against a double-free.
             unsafe { ffi::ferrompi_wait(self.handle) };
         }
     }
