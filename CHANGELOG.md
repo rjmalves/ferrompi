@@ -63,6 +63,18 @@ Behavior` rustdoc sections to `Request` and `PersistentRequest`
 
 ### Fixed
 
+- **`Win::fetch_and_op` and `Win::compare_and_swap` are now sound under
+  non-blocking RMA semantics.** Previously these methods passed
+  stack-local pointers (`addr_of!(origin)`, `result.as_mut_ptr()`) to
+  `MPI_Fetch_and_op` / `MPI_Compare_and_swap`, but MPI may not actually
+  read/write those buffers until the closing fence/complete/unlock —
+  by which time the stack frames have been reused. OpenMPI tolerated
+  it; MPICH 4.2.x exhibited the UB as zeroed returns. The fix boxes
+  origin (and `compare`, for CAS) and result on the heap; the returned
+  `PendingFetchResult<T>` owns the `Box`es so MPI's pointers remain
+  valid until `resolve()` is called. Closes architecture-review SG-1
+  for these two methods (the broader RMA buffer-lifetime story for
+  put/get/accumulate remains a v0.5 design item).
 - **`comm_table` is now thread-safe under `MPI_THREAD_MULTIPLE`.** The
   communicator handle table joined the other 6 handle tables in
   using C11 atomic-CAS slot allocation. Two threads calling

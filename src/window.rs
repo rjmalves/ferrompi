@@ -698,15 +698,25 @@ impl<T: MpiDatatype> Drop for SharedWindow<T> {
 // Win<'a, T> — general-purpose distributed RMA window
 // ============================================================================
 
-/// Opaque holder for the result buffer of a pending RMA fetch operation.
+/// Opaque holder for the buffers of a pending RMA fetch operation.
 ///
 /// `MPI_Fetch_and_op` and `MPI_Compare_and_swap` only *initiate* the
-/// operation. The result buffer is not guaranteed to be populated until the
-/// surrounding epoch closes (via `fence`, `complete`/`unlock`, or `flush`).
+/// operation. Both the origin (and `compare`, for CAS) buffer and the
+/// result buffer must remain at stable memory addresses until the
+/// surrounding epoch closes (via `fence`, `complete`/`unlock`, or `flush`)
+/// — MPI's network layer may not actually read/write them until then.
 ///
-/// This type carries the `MaybeUninit<T>` result buffer and exposes
-/// [`resolve`](PendingFetchResult::resolve), which the caller must invoke
-/// **only after the epoch has closed**.
+/// The Rust language's stack-frame and move semantics make naïve
+/// `&origin` / `&result` arguments unsound: the function returns before
+/// the epoch closes, and the stack locations are reused. To guarantee
+/// stable addresses, this type owns heap-allocated `Box`es for every
+/// input/output buffer, and only releases or drops them when [`resolve`]
+/// consumes the struct.
+///
+/// The type also carries an `Option<Box<T>>` for `compare_and_swap`'s
+/// extra `compare` argument; it is `None` for `fetch_and_op`.
+///
+/// [`resolve`]: PendingFetchResult::resolve
 ///
 /// # Example
 ///
@@ -728,7 +738,19 @@ impl<T: MpiDatatype> Drop for SharedWindow<T> {
 /// let old = unsafe { pending.resolve() };
 /// assert_eq!(old, 100);
 /// ```
-pub struct PendingFetchResult<T>(std::mem::MaybeUninit<T>);
+pub struct PendingFetchResult<T> {
+    /// Origin buffer — kept alive so MPI's pending RMA read sees stable
+    /// memory across the epoch.  Not used after resolve(); the Box is
+    /// dropped when PendingFetchResult is dropped.
+    _origin: Box<T>,
+    /// Optional `compare` operand for `MPI_Compare_and_swap`.  `None` for
+    /// `MPI_Fetch_and_op`.  Same lifetime invariant as `_origin`.
+    _compare: Option<Box<T>>,
+    /// Result buffer — kept alive so MPI's pending RMA write reaches a
+    /// stable destination.  resolve() reads from this box once the epoch
+    /// has closed.
+    result: Box<std::mem::MaybeUninit<T>>,
+}
 
 impl<T: Copy> PendingFetchResult<T> {
     /// Consume the pending result and return the fetched value.
@@ -750,11 +772,15 @@ impl<T: Copy> PendingFetchResult<T> {
     #[inline]
     pub unsafe fn resolve(self) -> T {
         // SAFETY: Caller guarantees the epoch has closed, at which point MPI
-        // has initialised the buffer with the pre-update remote value per
-        // MPI-3 §11.6.  All T: Copy types (enforced by the MpiDatatype +
-        // AtomicMpiDatatype bounds at the call site) are valid for any bit
-        // pattern, so assuming init is sound.
-        self.0.assume_init()
+        // has initialised the heap-allocated buffer with the pre-update
+        // remote value per MPI-3 §11.6.  All T: Copy types (enforced by the
+        // MpiDatatype + AtomicMpiDatatype bounds at the call site) are valid
+        // for any bit pattern, so assuming init is sound.  Dereferencing the
+        // Box moves the MaybeUninit<T> out of the heap allocation (allowed
+        // because MaybeUninit<T>: Copy when T: Copy), the Box itself is then
+        // freed when `self` is dropped.  The _origin and _compare boxes are
+        // dropped at the same time.
+        (*self.result).assume_init()
     }
 }
 
@@ -2297,23 +2323,29 @@ impl<T: MpiDatatype> Win<'_, T> {
         op: ReduceOp,
     ) -> Result<PendingFetchResult<T>> {
         use std::mem::MaybeUninit;
-        let mut result: MaybeUninit<T> = MaybeUninit::uninit();
-        // SAFETY: `std::ptr::addr_of!(origin)` is valid for a single T read
-        // (origin is a local stack variable that lives for the duration of this
-        // call). `result.as_mut_ptr()` is valid for a single T write; MPI will
-        // initialise it with the pre-update remote value when the epoch closes.
-        // `T::TAG` correctly represents T's memory layout per the `MpiDatatype`
-        // invariant; MPI_Fetch_and_op is restricted to predefined types, which
-        // is exactly what the `MpiDatatype` sealed trait represents.
-        // `op as i32` is the discriminant of a valid `ReduceOp` variant, which
-        // the C shim maps to the corresponding `MPI_Op` via `get_op()`.
-        // `win_handle` is a valid MPI window handle. The caller is responsible
-        // for ensuring this call is inside an active access epoch and for not
-        // calling resolve() before the epoch closes (see Safety Contract).
+        // Box the origin and result so they have heap-stable addresses
+        // that survive across the epoch.  MPI_Fetch_and_op only *initiates*
+        // the operation; the actual read of origin and write to result may
+        // not happen until the closing fence/complete/unlock.  Stack-local
+        // storage would be reused before then (function returns before the
+        // epoch closes), causing MPI to read/write into freed memory — UB
+        // observed as zeros on MPICH 4.2.x and as latent corruption on
+        // other implementations.  See PendingFetchResult docs for the
+        // lifetime contract.
+        let origin_box: Box<T> = Box::new(origin);
+        let result_box: Box<MaybeUninit<T>> = Box::new(MaybeUninit::uninit());
+        // SAFETY: origin_box.as_ref() points to a heap allocation that
+        // lives for the lifetime of PendingFetchResult (we move it into
+        // the returned struct below).  result_box similarly.  Both
+        // addresses remain valid until the user consumes the
+        // PendingFetchResult via resolve() (or drops it).  `T::TAG`,
+        // `op as i32`, target_rank, target_disp, and win_handle invariants
+        // are unchanged from the previous implementation.
         let ret = unsafe {
             ffi::ferrompi_fetch_and_op(
-                std::ptr::addr_of!(origin).cast::<std::ffi::c_void>(),
-                result.as_mut_ptr().cast::<std::ffi::c_void>(),
+                (origin_box.as_ref() as *const T).cast::<std::ffi::c_void>(),
+                (result_box.as_ref() as *const MaybeUninit<T> as *mut MaybeUninit<T>)
+                    .cast::<std::ffi::c_void>(),
                 T::TAG as i32,
                 target_rank,
                 target_disp,
@@ -2322,7 +2354,11 @@ impl<T: MpiDatatype> Win<'_, T> {
             )
         };
         Error::check_with_op(ret, "fetch_and_op")?;
-        Ok(PendingFetchResult(result))
+        Ok(PendingFetchResult {
+            _origin: origin_box,
+            _compare: None,
+            result: result_box,
+        })
     }
 }
 
@@ -2442,24 +2478,26 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
         target_disp: i64,
     ) -> crate::error::Result<PendingFetchResult<T>> {
         use std::mem::MaybeUninit;
-        let mut result: MaybeUninit<T> = MaybeUninit::uninit();
-        // SAFETY: `std::ptr::addr_of!(origin)` is valid for a single T read
-        // (origin is a local stack variable that lives for the duration of
-        // this call). `std::ptr::addr_of!(compare)` is similarly valid.
-        // `result.as_mut_ptr()` is valid for a single T write; MPI will
-        // initialise it with the pre-CAS remote value when the epoch closes.
-        // `T::TAG` correctly represents T's memory layout per the `MpiDatatype`
-        // invariant. `AtomicMpiDatatype` additionally restricts T to integer
-        // and byte types, which are the only types guaranteed to be valid for
-        // `MPI_Compare_and_swap` per MPI 4.1 section 12.5.4.
-        // `win_handle` is a valid MPI window handle. The caller is responsible
-        // for ensuring this call is inside an active access epoch and for not
-        // calling resolve() before the epoch closes (see Safety Contract above).
+        // Box origin, compare, and result for heap-stable addresses that
+        // survive across the epoch.  MPI_Compare_and_swap is non-blocking
+        // at the MPI level — the actual atomic CAS may not happen until
+        // the closing fence/complete/unlock, by which time stack-local
+        // storage would have been reused.  See PendingFetchResult docs.
+        let origin_box: Box<T> = Box::new(origin);
+        let compare_box: Box<T> = Box::new(compare);
+        let result_box: Box<MaybeUninit<T>> = Box::new(MaybeUninit::uninit());
+        // SAFETY: origin_box, compare_box, and result_box all point to
+        // heap allocations that live until PendingFetchResult is consumed
+        // or dropped (we move them into the returned struct below).
+        // `T::TAG`, target_rank, target_disp, and win_handle invariants
+        // are unchanged from the previous implementation.  `AtomicMpiDatatype`
+        // restricts T to integer/byte types per MPI 4.1 §12.5.4.
         let ret = unsafe {
             ffi::ferrompi_compare_and_swap(
-                std::ptr::addr_of!(origin).cast::<std::ffi::c_void>(),
-                std::ptr::addr_of!(compare).cast::<std::ffi::c_void>(),
-                result.as_mut_ptr().cast::<std::ffi::c_void>(),
+                (origin_box.as_ref() as *const T).cast::<std::ffi::c_void>(),
+                (compare_box.as_ref() as *const T).cast::<std::ffi::c_void>(),
+                (result_box.as_ref() as *const MaybeUninit<T> as *mut MaybeUninit<T>)
+                    .cast::<std::ffi::c_void>(),
                 T::TAG as i32,
                 target_rank,
                 target_disp,
@@ -2467,7 +2505,11 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
             )
         };
         Error::check_with_op(ret, "compare_and_swap")?;
-        Ok(PendingFetchResult(result))
+        Ok(PendingFetchResult {
+            _origin: origin_box,
+            _compare: Some(compare_box),
+            result: result_box,
+        })
     }
 }
 
