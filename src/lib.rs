@@ -125,6 +125,23 @@
 //!
 //! Use the `slurm` module (with `numa` feature) to read these values at runtime.
 //! See `examples/hybrid_openmp.rs` for the full pattern.
+//!
+//! ## Extended documentation
+//!
+//! Long-form documentation artifacts are embedded in the [`doc`] module and
+//! render as individual pages in this rustdoc. The same content is available
+//! as plain Markdown in the `docs/` directory.
+//!
+//! | Module | Description |
+//! |--------|-------------|
+//! | [`doc::architecture`] | Six-layer stack, handle tables, thread-safety model, FFI/ABI invariants, and generic `MpiDatatype` design |
+//! | [`doc::migrating_from_rsmpi`] | Function-for-function API mapping and migration cookbook from rsmpi |
+//! | [`doc::mpi_compatibility`] | Compatibility matrix for MPICH, Open MPI, Intel MPI, and Cray MPI |
+//! | [`doc::adr_0001_why_c_wrapper`] | ADR-0001: why a hand-written C wrapper is used instead of `bindgen` |
+//! | [`doc::adr_0002_handle_tables`] | ADR-0002: C11 atomic CAS strategy for the request-table under `MPI_THREAD_MULTIPLE` |
+//! | [`doc::adr_0003_generic_mpi_datatype`] | ADR-0003: sealed `MpiDatatype` trait family and `DatatypeTag` ABI contract |
+//! | [`doc::adr_0004_persistent_collective_approach`] | ADR-0004: `PersistentRequest` lifecycle and buffer-lifetime invariants |
+//! | [`doc::adr_0005_mpi_op_create`] | ADR-0005: `MPI_Op_create` closure storage, trampoline safety, and drop ordering |
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
@@ -136,6 +153,7 @@ use std::ffi::{c_char, CString};
 mod comm;
 mod datatype;
 mod datatype_builder;
+pub mod doc;
 mod error;
 mod ffi;
 mod group;

@@ -267,7 +267,7 @@ impl Communicator {
 
     /// All-reduce values using a user-defined reduction operation.
     ///
-    /// Invokes [`MPI_Allreduce`] with the `MPI_Op` registered inside `op`.
+    /// Invokes `MPI_Allreduce` with the `MPI_Op` registered inside `op`.
     /// Every rank must call this with the same `op`, the same count, and the
     /// same datatype `T`.
     ///

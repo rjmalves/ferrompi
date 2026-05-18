@@ -76,7 +76,7 @@ impl Communicator {
     ///
     /// # Buffer Requirement
     ///
-    /// A buffer must be attached via [`Mpi::buffer_attach`] **before** `start()` is
+    /// A buffer must be attached via `Mpi::buffer_attach` **before** `start()` is
     /// called on this request. If no buffer is attached when `start()` fires,
     /// MPI will return an error.
     ///

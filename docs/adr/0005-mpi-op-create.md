@@ -362,7 +362,7 @@ decision is left for that ticket to make.
 
 ### Public API surface
 
-```rust
+```rust,ignore
 /// A user-defined MPI reduction operation backed by a Rust closure.
 ///
 /// `T` must implement [`MpiDatatype`] — i.e., it must be one of the primitive
