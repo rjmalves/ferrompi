@@ -200,6 +200,7 @@ run_test test_alltoall_init_inplace 4
 run_test test_allreduce_bytes 4
 run_test test_error_context 2
 run_test test_request_table_concurrency 2
+run_test test_comm_table_concurrency 1
 run_test test_group_basic 4
 run_test test_group_set_ops 4
 run_test test_group_ranges 4
@@ -217,6 +218,7 @@ run_test test_persistent_p2p 2
 run_test test_persistent_rsend 2
 run_test test_persistent_ssend 2
 run_test test_persistent_bsend 2
+run_test test_persistent_count_overflow 2
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"

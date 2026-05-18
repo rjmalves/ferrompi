@@ -8,7 +8,9 @@
 //! - Communicator management (split, duplicate)
 //! - RMA shared memory windows (with `rma` feature)
 //! - SLURM environment helpers (with `numa` feature)
-//! - Large count support (MPI 4.0+ `_c` variants)
+//! - Large count support (MPI 4.0+ `_c` variants for blocking/nonblocking
+//!   collectives; persistent collectives currently reject `count > INT_MAX`
+//!   with `MPI_ERR_COUNT` — full `_c` dispatch for persistent ops is deferred)
 //!
 //! ## Supported Types
 //!

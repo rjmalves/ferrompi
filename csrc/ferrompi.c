@@ -38,8 +38,14 @@
 #define MAX_WINDOWS 256
 
 // Communicator table (index 0 is always COMM_WORLD)
+// comm_used uses C11 atomics to eliminate data races under MPI_THREAD_MULTIPLE.
+// alloc_comm uses a CAS loop (skipping slot 0, which is permanently MPI_COMM_WORLD);
+// ferrompi_comm_free uses atomic_store (release); get_comm uses atomic_load (acquire)
+// for slots other than 0.  Mirrors the win_used/alloc_win pattern.  See
+// docs/adr/0002-handle-tables.md for the full rationale.
 static MPI_Comm comm_table[MAX_COMMS];
-static int comm_count = 1;  // Start at 1, 0 is COMM_WORLD
+static atomic_int comm_used[MAX_COMMS];  // 1 if slot is in use
+static atomic_int next_comm_hint;
 
 // Request table
 // request_used and next_request_hint use C11 atomics (stdatomic.h) to
@@ -100,10 +106,13 @@ static void init_tables(void) {
     if (tables_initialized) return;
     
     // Note: MPI_COMM_WORLD must be set AFTER MPI_Init is called
-    // comm_table[0] will be set in ferrompi_init* functions
+    // comm_table[0] will be set in ferrompi_init* functions; comm_used[0] is
+    // set to 1 there as well, immediately after MPI_COMM_WORLD is assigned.
     for (int i = 0; i < MAX_COMMS; i++) {
         comm_table[i] = MPI_COMM_NULL;
+        atomic_init(&comm_used[i], 0);
     }
+    atomic_init(&next_comm_hint, 1);  // Start scanning from slot 1 (slot 0 is COMM_WORLD)
     for (int i = 0; i < MAX_REQUESTS; i++) {
         request_table[i] = MPI_REQUEST_NULL;
         atomic_init(&request_used[i], 0);
@@ -139,21 +148,45 @@ static void init_tables(void) {
     tables_initialized = 1;
 }
 
-// Get MPI_Comm from handle
+// Get MPI_Comm from handle (thread-safe: acquire load pairs with the release
+// store in ferrompi_comm_free).  Slot 0 (MPI_COMM_WORLD) is always valid
+// post-init and does not require a comm_used check.
 static MPI_Comm get_comm(int32_t handle) {
     if (handle < 0 || handle >= MAX_COMMS) {
+        return MPI_COMM_NULL;
+    }
+    if (handle != 0 &&
+            !atomic_load_explicit(&comm_used[handle], memory_order_acquire)) {
         return MPI_COMM_NULL;
     }
     return comm_table[handle];
 }
 
-// Allocate a communicator handle
+// Allocate a communicator handle (thread-safe via C11 CAS, mirrors alloc_win).
+// Slot 0 is permanently MPI_COMM_WORLD; we skip it explicitly so the CAS can
+// never claim it.  The hint is advisory: an inaccurate hint only lengthens the
+// scan, never produces an incorrect result.  acq_rel on the CAS prevents
+// reordering of the slot-claim with later operations on the same thread, but
+// the subsequent comm_table[idx] write is NOT covered by the CAS's release
+// fence (it is sequenced after, not before).  The handle returned by this
+// function is then used same-thread (caller writes it, then later reads it
+// via get_comm); cross-thread handle transfers must establish their own
+// happens-before via the transfer mechanism (channel, Arc, Mutex, etc.).
+// Within this same-thread/transfer-aware contract the implementation is
+// correct on x86, ARM64, and POWER.
 static int32_t alloc_comm(MPI_Comm comm) {
-    for (int i = 1; i < MAX_COMMS; i++) {
-        if (comm_table[i] == MPI_COMM_NULL) {
-            comm_table[i] = comm;
-            if (i >= comm_count) comm_count = i + 1;
-            return i;
+    int hint = atomic_load_explicit(&next_comm_hint, memory_order_relaxed);
+    for (int i = 0; i < MAX_COMMS; i++) {
+        int idx = (hint + i) % MAX_COMMS;
+        if (idx == 0) continue;  // slot 0 is MPI_COMM_WORLD; never reuse
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &comm_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            comm_table[idx] = comm;
+            atomic_store_explicit(&next_comm_hint,
+                (idx + 1) % MAX_COMMS, memory_order_relaxed);
+            return (int32_t)idx;
         }
     }
     return -1;  // No space
@@ -454,6 +487,7 @@ int ferrompi_init_thread(int required, int* provided) {
     // Initialize COMM_WORLD after MPI_Init and install the error handler
     if (ret == MPI_SUCCESS) {
         comm_table[0] = MPI_COMM_WORLD;
+        atomic_store_explicit(&comm_used[0], 1, memory_order_release);
         int eh_ret = install_errors_return(MPI_COMM_WORLD);
         if (eh_ret != MPI_SUCCESS) {
             return eh_ret;
@@ -480,6 +514,7 @@ int ferrompi_init(void) {
     // Initialize COMM_WORLD after MPI_Init and install the error handler
     if (ret == MPI_SUCCESS) {
         comm_table[0] = MPI_COMM_WORLD;
+        atomic_store_explicit(&comm_used[0], 1, memory_order_release);
         int eh_ret = install_errors_return(MPI_COMM_WORLD);
         if (eh_ret != MPI_SUCCESS) {
             return eh_ret;
@@ -538,11 +573,12 @@ int ferrompi_finalize(void) {
         atomic_store_explicit(&win_used[i], 0, memory_order_release);
     }
 
-    // Clean up any remaining communicators
-    for (int i = 1; i < comm_count; i++) {
-        if (comm_table[i] != MPI_COMM_NULL) {
+    // Clean up any remaining communicators (skip slot 0, which is MPI_COMM_WORLD)
+    for (int i = 1; i < MAX_COMMS; i++) {
+        if (atomic_load_explicit(&comm_used[i], memory_order_acquire)) {
             MPI_Comm_free(&comm_table[i]);
             comm_table[i] = MPI_COMM_NULL;
+            atomic_store_explicit(&comm_used[i], 0, memory_order_release);
         }
     }
     
@@ -608,11 +644,13 @@ int ferrompi_comm_free(int32_t comm_handle) {
     if (comm_handle < 0 || comm_handle >= MAX_COMMS) {
         return MPI_ERR_COMM;
     }
-    if (comm_table[comm_handle] == MPI_COMM_NULL) {
+    if (!atomic_load_explicit(&comm_used[comm_handle], memory_order_acquire)) {
         return MPI_SUCCESS;  // Already freed
     }
-    int ret = MPI_Comm_free(&comm_table[comm_handle]);
+    MPI_Comm comm = comm_table[comm_handle];
+    int ret = MPI_Comm_free(&comm);
     comm_table[comm_handle] = MPI_COMM_NULL;
+    atomic_store_explicit(&comm_used[comm_handle], 0, memory_order_release);
     return ret;
 }
 
@@ -2036,6 +2074,9 @@ int ferrompi_send_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Send_init(buf, (int)count, dt, dest, tag, comm, &req);
@@ -2063,6 +2104,9 @@ int ferrompi_recv_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int mpi_source = (source == -1) ? MPI_ANY_SOURCE : source;
@@ -2093,6 +2137,9 @@ int ferrompi_rsend_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Rsend_init(buf, (int)count, dt, dest, tag, comm, &req);
@@ -2120,6 +2167,9 @@ int ferrompi_ssend_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Ssend_init(buf, (int)count, dt, dest, tag, comm, &req);
@@ -2229,6 +2279,9 @@ int ferrompi_bsend_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Bsend_init(buf, (int)count, dt, dest, tag, comm, &req);
@@ -2284,8 +2337,11 @@ int ferrompi_bcast_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
-    
+
     int ret = MPI_Bcast_init(buf, (int)count, dt, root, comm, MPI_INFO_NULL, &req);
     
     if (ret == MPI_SUCCESS) {
@@ -2311,9 +2367,12 @@ int ferrompi_allreduce_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
-    
+
     int ret = MPI_Allreduce_init(sendbuf, recvbuf, (int)count, dt,
                                   mpi_op, comm, MPI_INFO_NULL, &req);
     
@@ -2339,9 +2398,12 @@ int ferrompi_allreduce_init_inplace(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
-    
+
     int ret = MPI_Allreduce_init(MPI_IN_PLACE, buf, (int)count, dt,
                                   mpi_op, comm, MPI_INFO_NULL, &req);
     
@@ -2369,8 +2431,11 @@ int ferrompi_gather_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
-    
+
     int ret = MPI_Gather_init(sendbuf, (int)sendcount, dt,
                               recvbuf, (int)recvcount, dt,
                               root, comm, MPI_INFO_NULL, &req);
@@ -2399,6 +2464,9 @@ int ferrompi_reduce_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
 
@@ -2429,6 +2497,9 @@ int ferrompi_scatter_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Scatter_init(sendbuf, (int)sendcount, dt,
@@ -2458,6 +2529,9 @@ int ferrompi_allgather_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Allgather_init(sendbuf, (int)sendcount, dt,
@@ -2487,6 +2561,9 @@ int ferrompi_scan_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
 
@@ -2516,6 +2593,9 @@ int ferrompi_exscan_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (count > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
 
@@ -2545,6 +2625,9 @@ int ferrompi_alltoall_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Alltoall_init(sendbuf, (int)sendcount, dt,
@@ -2569,6 +2652,9 @@ int ferrompi_gather_init_inplace(void* recvbuf, int64_t recvcount,
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     if (!is_root) return MPI_ERR_ARG;
     MPI_Request req;
     int ret = MPI_Gather_init(MPI_IN_PLACE, 0, dt,
@@ -2590,6 +2676,9 @@ int ferrompi_allgather_init_inplace(void* recvbuf, int64_t recvcount,
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
     int ret = MPI_Allgather_init(MPI_IN_PLACE, 0, dt,
                                  recvbuf, (int)recvcount, dt,
@@ -2612,6 +2701,9 @@ int ferrompi_scatter_init_inplace(const void* sendbuf, int64_t sendcount,
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX || recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
     int ret;
     if (is_root) {
@@ -2639,6 +2731,9 @@ int ferrompi_alltoall_init_inplace(void* recvbuf, int64_t recvcount,
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
     int ret = MPI_Alltoall_init(MPI_IN_PLACE, 0, dt,
                                 recvbuf, (int)recvcount, dt,
@@ -2667,6 +2762,9 @@ int ferrompi_gatherv_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Gatherv_init(sendbuf, (int)sendcount, dt,
@@ -2698,6 +2796,9 @@ int ferrompi_scatterv_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Scatterv_init(sendbuf, (const int*)sendcounts, (const int*)displs, dt,
@@ -2728,6 +2829,9 @@ int ferrompi_allgatherv_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (sendcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Request req;
 
     int ret = MPI_Allgatherv_init(sendbuf, (int)sendcount, dt,
@@ -2788,6 +2892,9 @@ int ferrompi_reduce_scatter_block_init(
     MPI_Comm comm = get_comm(comm_handle);
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
+    if (recvcount > INT_MAX) {
+        return MPI_ERR_COUNT;
+    }
     MPI_Op mpi_op = get_op(op);
     MPI_Request req;
 
