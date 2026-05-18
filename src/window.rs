@@ -698,6 +698,66 @@ impl<T: MpiDatatype> Drop for SharedWindow<T> {
 // Win<'a, T> — general-purpose distributed RMA window
 // ============================================================================
 
+/// Opaque holder for the result buffer of a pending RMA fetch operation.
+///
+/// `MPI_Fetch_and_op` and `MPI_Compare_and_swap` only *initiate* the
+/// operation. The result buffer is not guaranteed to be populated until the
+/// surrounding epoch closes (via `fence`, `complete`/`unlock`, or `flush`).
+///
+/// This type carries the `MaybeUninit<T>` result buffer and exposes
+/// [`resolve`](PendingFetchResult::resolve), which the caller must invoke
+/// **only after the epoch has closed**.
+///
+/// # Example
+///
+/// ```no_run
+/// use ferrompi::{Mpi, ReduceOp, Win, WinFenceAssert};
+///
+/// let mpi = Mpi::init().unwrap();
+/// let world = mpi.world();
+/// let mut win = Win::<i32>::allocate(&world, 1).unwrap();
+///
+/// win.fence(WinFenceAssert::default()).unwrap();
+///
+/// let pending = win.fetch_and_op(1, 1, 0, ReduceOp::Sum).unwrap();
+///
+/// // Close epoch — MPI_Fetch_and_op completes here
+/// win.fence(WinFenceAssert::default()).unwrap();
+///
+/// // SAFETY: epoch is closed; result is now populated.
+/// let old = unsafe { pending.resolve() };
+/// assert_eq!(old, 100);
+/// ```
+pub struct PendingFetchResult<T>(std::mem::MaybeUninit<T>);
+
+impl<T: Copy> PendingFetchResult<T> {
+    /// Consume the pending result and return the fetched value.
+    ///
+    /// # Safety
+    ///
+    /// The caller **must** ensure that the surrounding RMA epoch has been
+    /// closed before calling this method. Specifically:
+    ///
+    /// - For fence-mode windows: [`Win::fence`] must have been called to close
+    ///   the epoch.
+    /// - For PSCW windows: `MPI_Win_complete` / `MPI_Win_wait` must have been
+    ///   called.
+    /// - For lock-mode windows: `MPI_Win_unlock` or `MPI_Win_flush` must have
+    ///   been called.
+    ///
+    /// Reading the result before the epoch closes yields an unspecified,
+    /// possibly uninitialised value (UB in Rust).
+    #[inline]
+    pub unsafe fn resolve(self) -> T {
+        // SAFETY: Caller guarantees the epoch has closed, at which point MPI
+        // has initialised the buffer with the pre-update remote value per
+        // MPI-3 §11.6.  All T: Copy types (enforced by the MpiDatatype +
+        // AtomicMpiDatatype bounds at the call site) are valid for any bit
+        // pattern, so assuming init is sound.
+        self.0.assume_init()
+    }
+}
+
 /// Tracks whether the local buffer is caller-supplied or MPI-managed.
 ///
 /// This controls `Drop` semantics: in both cases `MPI_Win_free` is called
@@ -2155,22 +2215,20 @@ impl<T: MpiDatatype> Win<'_, T> {
     }
 
     /// Single-element atomic fetch-and-update: reads the current value at
-    /// `(target_rank, target_disp)` into the returned `T`, then applies
-    /// `op(origin, target_old)` at the target — both atomically with respect
-    /// to other RMA operations in the same epoch.
+    /// `(target_rank, target_disp)` into the returned [`PendingFetchResult<T>`],
+    /// then applies `op(origin, target_old)` at the target — both atomically
+    /// with respect to other RMA operations in the same epoch.
     ///
     /// Wraps `MPI_Fetch_and_op`. Restricted to predefined MPI datatypes only
     /// (no derived or custom datatypes); the `T: MpiDatatype` bound enforces
     /// this at compile time.
     ///
     /// **Important:** `MPI_Fetch_and_op` only *initiates* the operation. The
-    /// returned `T` is populated with the pre-update remote value **only after
-    /// the surrounding epoch closes** (via `fence`, `complete`, or `unlock`).
-    /// Reading the returned value before the epoch closes yields an
-    /// unspecified, possibly uninitialised result. This caveat is a documented
-    /// invariant — the return type is `Result<T>` (not `Result<MaybeUninit<T>>`)
-    /// because all `MpiDatatype` types are `Copy` and the pattern is standard
-    /// across MPI wrappers.
+    /// returned `PendingFetchResult<T>` is populated with the pre-update remote
+    /// value **only after the surrounding epoch closes** (via `fence`,
+    /// `complete`, or `unlock`). Call [`PendingFetchResult::resolve`] **only
+    /// after closing the epoch** — reading it earlier is undefined behaviour per
+    /// MPI-3 §11.6.
     ///
     /// # Arguments
     ///
@@ -2192,10 +2250,11 @@ impl<T: MpiDatatype> Win<'_, T> {
     /// 1. This call must be made **inside** an active access epoch (fence,
     ///    start, or lock). Calling it outside an epoch is undefined per the
     ///    MPI standard.
-    /// 2. The returned `T` must not be read until the epoch closes.
+    /// 2. [`PendingFetchResult::resolve`] must not be called until the epoch
+    ///    closes.
     ///
     /// The borrow checker cannot enforce the epoch-completion constraint — this
-    /// contract is a documented invariant.
+    /// contract is a documented invariant on [`PendingFetchResult::resolve`].
     ///
     /// # Example
     ///
@@ -2214,17 +2273,21 @@ impl<T: MpiDatatype> Win<'_, T> {
     /// // Open fence epoch on all ranks
     /// win.fence(WinFenceAssert::default()).unwrap();
     ///
-    /// // Rank 0 atomically adds 1 and fetches the old value
-    /// let old = if world.rank() == 0 {
-    ///     win.fetch_and_op(1, 1, 0, ReduceOp::Sum).unwrap()
+    /// // Rank 0 atomically adds 1 and fetches the old value (operation initiated)
+    /// let pending = if world.rank() == 0 {
+    ///     Some(win.fetch_and_op(1, 1, 0, ReduceOp::Sum).unwrap())
     /// } else {
-    ///     0
+    ///     None
     /// };
     ///
     /// // Close epoch — fetch_and_op completes here
     /// win.fence(WinFenceAssert::default()).unwrap();
     ///
-    /// // Rank 0: old == 100; Rank 1's window slot 0 == 101
+    /// // SAFETY: epoch is closed; result buffer is now populated.
+    /// if let Some(p) = pending {
+    ///     let old = unsafe { p.resolve() };
+    ///     assert_eq!(old, 100); // pre-update value; window slot is now 101
+    /// }
     /// ```
     pub fn fetch_and_op(
         &self,
@@ -2232,21 +2295,21 @@ impl<T: MpiDatatype> Win<'_, T> {
         target_rank: i32,
         target_disp: i64,
         op: ReduceOp,
-    ) -> Result<T> {
+    ) -> Result<PendingFetchResult<T>> {
         use std::mem::MaybeUninit;
         let mut result: MaybeUninit<T> = MaybeUninit::uninit();
-        // SAFETY: `&origin as *const T` is valid for a single T read (origin is a
-        // local stack variable that lives for the duration of this call).
-        // `result.as_mut_ptr()` is valid for a single T write; MPI will
+        // SAFETY: `std::ptr::addr_of!(origin)` is valid for a single T read
+        // (origin is a local stack variable that lives for the duration of this
+        // call). `result.as_mut_ptr()` is valid for a single T write; MPI will
         // initialise it with the pre-update remote value when the epoch closes.
         // `T::TAG` correctly represents T's memory layout per the `MpiDatatype`
-        // invariant; MPI_Fetch_and_op is restricted to predefined types, which is
-        // exactly what the `MpiDatatype` sealed trait represents.
+        // invariant; MPI_Fetch_and_op is restricted to predefined types, which
+        // is exactly what the `MpiDatatype` sealed trait represents.
         // `op as i32` is the discriminant of a valid `ReduceOp` variant, which
         // the C shim maps to the corresponding `MPI_Op` via `get_op()`.
-        // `win_handle` is a valid MPI window handle. The caller is responsible for
-        // ensuring this call is inside an active access epoch and that the
-        // returned value is not read before the epoch closes (see Safety Contract).
+        // `win_handle` is a valid MPI window handle. The caller is responsible
+        // for ensuring this call is inside an active access epoch and for not
+        // calling resolve() before the epoch closes (see Safety Contract).
         let ret = unsafe {
             ffi::ferrompi_fetch_and_op(
                 std::ptr::addr_of!(origin).cast::<std::ffi::c_void>(),
@@ -2259,25 +2322,23 @@ impl<T: MpiDatatype> Win<'_, T> {
             )
         };
         Error::check_with_op(ret, "fetch_and_op")?;
-        // SAFETY: MPI_Fetch_and_op initialises the result buffer with the
-        // pre-update remote value when the epoch closes. All `MpiDatatype`
-        // types are `Copy` (no destructor), so assuming init here is safe
-        // provided the caller has closed the epoch before reading this value
-        // (documented in the Safety Contract above).
-        Ok(unsafe { result.assume_init() })
+        Ok(PendingFetchResult(result))
     }
 }
 
 impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     /// Single-element atomic compare-and-swap: conditionally replace a remote
-    /// element if it matches an expected value, returning the pre-CAS value.
+    /// element if it matches an expected value, returning a
+    /// [`PendingFetchResult<T>`] that holds the pre-CAS remote value once the
+    /// epoch closes.
     ///
     /// Wraps `MPI_Compare_and_swap`. Atomically reads the remote element at
     /// `(target_rank, target_disp)` and compares it to `compare`. If they are
-    /// equal, the remote element is replaced with `origin`. The returned `T`
-    /// is **always** the pre-CAS remote value, regardless of whether the swap
-    /// succeeded — the caller determines swap success by comparing the returned
-    /// value with `compare`.
+    /// equal, the remote element is replaced with `origin`. The
+    /// `PendingFetchResult<T>` is **always** the pre-CAS remote value,
+    /// regardless of whether the swap succeeded — the caller determines swap
+    /// success by calling [`resolve`](PendingFetchResult::resolve) after the
+    /// epoch closes and comparing with `compare`.
     ///
     /// This method is restricted to types that implement [`AtomicMpiDatatype`]:
     /// `i32`, `i64`, `u32`, `u64`, and `u8`. Floating-point types (`f32`,
@@ -2287,11 +2348,10 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     /// [`AtomicMpiDatatype`]: crate::AtomicMpiDatatype
     ///
     /// **Important:** `MPI_Compare_and_swap` only *initiates* the operation.
-    /// The returned `T` is populated with the pre-CAS remote value **only
-    /// after the surrounding epoch closes** (via `fence`, `complete`, or
-    /// `unlock`). Reading the returned value before the epoch closes yields
-    /// an unspecified result. This is a documented invariant — the borrow
-    /// checker cannot enforce the epoch-completion constraint.
+    /// The `PendingFetchResult<T>` is populated with the pre-CAS remote value
+    /// **only after the surrounding epoch closes** (via `fence`, `complete`,
+    /// or `unlock`). Call [`PendingFetchResult::resolve`] **only after closing
+    /// the epoch** — reading it earlier is undefined behaviour per MPI-3 §11.6.
     ///
     /// # Arguments
     ///
@@ -2306,8 +2366,9 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     ///
     /// # Returns
     ///
-    /// `Ok(old_value)` — the remote element's value **before** the CAS. The
-    /// caller can check whether the swap succeeded:
+    /// `Ok(PendingFetchResult<T>)` — call [`resolve`](PendingFetchResult::resolve)
+    /// after the epoch closes to obtain the pre-CAS value and check whether
+    /// the swap succeeded:
     ///
     /// ```no_run
     /// # use ferrompi::{Mpi, Win, WinFenceAssert};
@@ -2317,9 +2378,11 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     /// # win.fence(WinFenceAssert::default()).unwrap();
     /// let expected = 100i32;
     /// let new_val  = 200i32;
-    /// let old = win.compare_and_swap(new_val, expected, 1, 0).unwrap();
-    /// // (close the epoch before reading `old`)
+    /// let pending = win.compare_and_swap(new_val, expected, 1, 0).unwrap();
+    /// // close epoch first
     /// # win.fence(WinFenceAssert::default()).unwrap();
+    /// // SAFETY: epoch is closed.
+    /// let old = unsafe { pending.resolve() };
     /// let swapped = old == expected;
     /// ```
     ///
@@ -2333,10 +2396,11 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     /// 1. This call must be made **inside** an active access epoch (fence,
     ///    start, or lock). Calling it outside an epoch is undefined per the
     ///    MPI standard.
-    /// 2. The returned `T` must not be read until the epoch closes.
+    /// 2. [`PendingFetchResult::resolve`] must not be called until the epoch
+    ///    closes.
     ///
     /// The borrow checker cannot enforce the epoch-completion constraint — this
-    /// contract is a documented invariant.
+    /// contract is a documented invariant on [`PendingFetchResult::resolve`].
     ///
     /// # Example
     ///
@@ -2354,17 +2418,21 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
     ///
     /// win.fence(WinFenceAssert::default()).unwrap();
     ///
-    /// // Rank 0: swap in 200 only if the current value is 100
-    /// let old = if world.rank() == 0 {
-    ///     win.compare_and_swap(200, 100, 1, 0).unwrap()
+    /// // Rank 0: swap in 200 only if the current value is 100 (initiated here)
+    /// let pending = if world.rank() == 0 {
+    ///     Some(win.compare_and_swap(200, 100, 1, 0).unwrap())
     /// } else {
-    ///     0
+    ///     None
     /// };
     ///
     /// // Close epoch — compare_and_swap completes here
     /// win.fence(WinFenceAssert::default()).unwrap();
     ///
-    /// // Rank 0: old == 100; Rank 1's window slot 0 == 200
+    /// // SAFETY: epoch is closed; result buffer is now populated.
+    /// if let Some(p) = pending {
+    ///     let old = unsafe { p.resolve() };
+    ///     assert_eq!(old, 100); // pre-CAS; slot 0 is now 200
+    /// }
     /// ```
     pub fn compare_and_swap(
         &self,
@@ -2372,7 +2440,7 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
         compare: T,
         target_rank: i32,
         target_disp: i64,
-    ) -> crate::error::Result<T> {
+    ) -> crate::error::Result<PendingFetchResult<T>> {
         use std::mem::MaybeUninit;
         let mut result: MaybeUninit<T> = MaybeUninit::uninit();
         // SAFETY: `std::ptr::addr_of!(origin)` is valid for a single T read
@@ -2385,9 +2453,8 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
         // and byte types, which are the only types guaranteed to be valid for
         // `MPI_Compare_and_swap` per MPI 4.1 section 12.5.4.
         // `win_handle` is a valid MPI window handle. The caller is responsible
-        // for ensuring this call is inside an active access epoch and that the
-        // returned value is not read before the epoch closes (see Safety
-        // Contract above).
+        // for ensuring this call is inside an active access epoch and for not
+        // calling resolve() before the epoch closes (see Safety Contract above).
         let ret = unsafe {
             ffi::ferrompi_compare_and_swap(
                 std::ptr::addr_of!(origin).cast::<std::ffi::c_void>(),
@@ -2400,12 +2467,7 @@ impl<'a, T: crate::AtomicMpiDatatype + MpiDatatype> Win<'a, T> {
             )
         };
         Error::check_with_op(ret, "compare_and_swap")?;
-        // SAFETY: MPI_Compare_and_swap initialises the result buffer with the
-        // pre-CAS remote value when the epoch closes. All `AtomicMpiDatatype`
-        // types are `Copy` (no destructor), so assuming init here is safe
-        // provided the caller has closed the epoch before reading this value
-        // (documented in the Safety Contract above).
-        Ok(unsafe { result.assume_init() })
+        Ok(PendingFetchResult(result))
     }
 }
 
@@ -2807,47 +2869,48 @@ mod tests {
 
     #[test]
     fn win_fetch_and_op_signature_compiles() {
-        // Compile-time witness: Win::fetch_and_op has the correct signature for
-        // representative predefined types (i32, u64, f64).
-        fn _check_i32(w: &Win<'_, i32>) -> Result<i32> {
+        // Compile-time witness: Win::fetch_and_op returns Result<PendingFetchResult<T>>
+        // for representative predefined types (i32, u64, f64).
+        fn _check_i32(w: &Win<'_, i32>) -> Result<PendingFetchResult<i32>> {
             w.fetch_and_op(1, 0, 0, ReduceOp::Sum)
         }
-        fn _check_u64(w: &Win<'_, u64>) -> Result<u64> {
+        fn _check_u64(w: &Win<'_, u64>) -> Result<PendingFetchResult<u64>> {
             w.fetch_and_op(1u64, 0, 0, ReduceOp::Sum)
         }
-        fn _check_f64(w: &Win<'_, f64>) -> Result<f64> {
+        fn _check_f64(w: &Win<'_, f64>) -> Result<PendingFetchResult<f64>> {
             w.fetch_and_op(1.0, 0, 0, ReduceOp::Sum)
         }
-        let _ = _check_i32 as fn(&Win<'_, i32>) -> Result<i32>;
-        let _ = _check_u64 as fn(&Win<'_, u64>) -> Result<u64>;
-        let _ = _check_f64 as fn(&Win<'_, f64>) -> Result<f64>;
+        let _ = _check_i32 as fn(&Win<'_, i32>) -> Result<PendingFetchResult<i32>>;
+        let _ = _check_u64 as fn(&Win<'_, u64>) -> Result<PendingFetchResult<u64>>;
+        let _ = _check_f64 as fn(&Win<'_, f64>) -> Result<PendingFetchResult<f64>>;
     }
 
     #[test]
     fn win_compare_and_swap_signature_compiles() {
-        // Compile-time witness: Win::compare_and_swap has the correct signature
-        // for the five AtomicMpiDatatype types. f64 must NOT compile (verified
-        // via the compile_fail doctest in datatype.rs).
-        fn _check_i32(w: &Win<'_, i32>) -> Result<i32> {
+        // Compile-time witness: Win::compare_and_swap returns
+        // Result<PendingFetchResult<T>> for the five AtomicMpiDatatype types.
+        // f64 must NOT compile (verified via the compile_fail doctest in
+        // datatype.rs).
+        fn _check_i32(w: &Win<'_, i32>) -> Result<PendingFetchResult<i32>> {
             w.compare_and_swap(200, 100, 0, 0)
         }
-        fn _check_i64(w: &Win<'_, i64>) -> Result<i64> {
+        fn _check_i64(w: &Win<'_, i64>) -> Result<PendingFetchResult<i64>> {
             w.compare_and_swap(200i64, 100i64, 0, 0)
         }
-        fn _check_u32(w: &Win<'_, u32>) -> Result<u32> {
+        fn _check_u32(w: &Win<'_, u32>) -> Result<PendingFetchResult<u32>> {
             w.compare_and_swap(200u32, 100u32, 0, 0)
         }
-        fn _check_u64(w: &Win<'_, u64>) -> Result<u64> {
+        fn _check_u64(w: &Win<'_, u64>) -> Result<PendingFetchResult<u64>> {
             w.compare_and_swap(200u64, 100u64, 0, 0)
         }
-        fn _check_u8(w: &Win<'_, u8>) -> Result<u8> {
+        fn _check_u8(w: &Win<'_, u8>) -> Result<PendingFetchResult<u8>> {
             w.compare_and_swap(2u8, 1u8, 0, 0)
         }
-        let _ = _check_i32 as fn(&Win<'_, i32>) -> Result<i32>;
-        let _ = _check_i64 as fn(&Win<'_, i64>) -> Result<i64>;
-        let _ = _check_u32 as fn(&Win<'_, u32>) -> Result<u32>;
-        let _ = _check_u64 as fn(&Win<'_, u64>) -> Result<u64>;
-        let _ = _check_u8 as fn(&Win<'_, u8>) -> Result<u8>;
+        let _ = _check_i32 as fn(&Win<'_, i32>) -> Result<PendingFetchResult<i32>>;
+        let _ = _check_i64 as fn(&Win<'_, i64>) -> Result<PendingFetchResult<i64>>;
+        let _ = _check_u32 as fn(&Win<'_, u32>) -> Result<PendingFetchResult<u32>>;
+        let _ = _check_u64 as fn(&Win<'_, u64>) -> Result<PendingFetchResult<u64>>;
+        let _ = _check_u8 as fn(&Win<'_, u8>) -> Result<PendingFetchResult<u8>>;
     }
 
     #[test]

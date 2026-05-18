@@ -113,10 +113,13 @@ impl PersistentRequest {
             // Not started, nothing to wait for
             return Ok(());
         }
-        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
-        Error::check_with_op(ret, "wait")?;
+        // Mark inactive BEFORE the FFI call so that Drop does not attempt a
+        // second MPI_Wait on error.  A request handed to MPI_Wait is consumed
+        // by MPI regardless of whether MPI reports an error; re-waiting on it
+        // would be a use-after-free of the request handle.
         self.active = false;
-        Ok(())
+        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
+        Error::check_with_op(ret, "wait")
     }
 
     /// Test if the operation has completed without blocking.
@@ -171,15 +174,14 @@ impl PersistentRequest {
         }
 
         let mut handles: Vec<i64> = requests.iter().map(|r| r.handle).collect();
-        let ret = unsafe { ffi::ferrompi_waitall(handles.len() as i64, handles.as_mut_ptr()) };
-        Error::check_with_op(ret, "waitall")?;
-
-        // Only mark as inactive after successful wait
+        // Mark all inactive BEFORE the FFI call: MPI_Waitall consumes every
+        // request handle regardless of whether it reports an error, so Drop
+        // must not attempt a second MPI_Wait on any of them.
         for req in requests.iter_mut() {
             req.active = false;
         }
-
-        Ok(())
+        let ret = unsafe { ffi::ferrompi_waitall(handles.len() as i64, handles.as_mut_ptr()) };
+        Error::check_with_op(ret, "waitall")
     }
 }
 

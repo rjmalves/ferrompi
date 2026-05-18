@@ -188,8 +188,8 @@ pub use topology::SlurmInfo;
 pub use topology::{HostEntry, TopologyInfo};
 #[cfg(feature = "rma")]
 pub use window::{
-    LockAllGuard, LockGuard, LockType, SharedWindow, Win, WinFenceAssert, WinKind, WinLockAllGuard,
-    WinLockGuard, WinPscwAssert,
+    LockAllGuard, LockGuard, LockType, PendingFetchResult, SharedWindow, Win, WinFenceAssert,
+    WinKind, WinLockAllGuard, WinLockGuard, WinPscwAssert,
 };
 
 use std::marker::PhantomData;

@@ -51,24 +51,30 @@ static atomic_int request_used[MAX_REQUESTS];  // 1 if slot is in use
 static atomic_int next_request_hint;
 
 // Window table
+// win_used uses C11 atomics to eliminate data races under MPI_THREAD_MULTIPLE.
+// alloc_win uses a CAS loop; free_win uses atomic_store (release); readers use
+// atomic_load (acquire).  Mirrors the request_used/alloc_request pattern.
 static MPI_Win win_table[MAX_WINDOWS];
-static int win_used[MAX_WINDOWS];  // 1 if slot is in use
-static int next_win_hint = 0;
+static atomic_int win_used[MAX_WINDOWS];  // 1 if slot is in use
+static atomic_int next_win_hint;
 
 // Info table
+// info_used uses C11 atomics for the same reason as win_used above.
 static MPI_Info info_table[MAX_INFOS];
-static int info_used[MAX_INFOS];  // 1 if slot is in use
-static int next_info_hint = 0;
+static atomic_int info_used[MAX_INFOS];  // 1 if slot is in use
+static atomic_int next_info_hint;
 
 // Group table (slot 0 reserved for MPI_GROUP_EMPTY, lazily populated)
+// group_used uses C11 atomics for the same reason as win_used above.
 static MPI_Group group_table[MAX_GROUPS];
-static int group_used[MAX_GROUPS];  // 1 if slot is in use
-static int next_group_hint = 0;
+static atomic_int group_used[MAX_GROUPS];  // 1 if slot is in use
+static atomic_int next_group_hint;
 
 // Custom (derived) datatype table
+// datatype_used uses C11 atomics for the same reason as win_used above.
 static MPI_Datatype datatype_table[MAX_DATATYPES];
-static int datatype_used[MAX_DATATYPES];  // 1 if slot is in use
-static int next_datatype_hint = 0;
+static atomic_int datatype_used[MAX_DATATYPES];  // 1 if slot is in use
+static atomic_int next_datatype_hint;
 
 // Maximum number of concurrent user-defined MPI_Op objects
 #define MAX_OPS 16
@@ -80,8 +86,12 @@ static atomic_int next_op_hint;
 
 // Fat-pointer pairs for each registered Rust closure
 // (data pointer + vtable pointer of Box<dyn Fn(...)>)
-static void* op_closure_data[MAX_OPS];
-static void* op_closure_vtbl[MAX_OPS];
+// Both arrays use C11 _Atomic(void*) to eliminate the data race under
+// MPI_THREAD_MULTIPLE: a reduction trampoline running on any MPI thread reads
+// these atomically (acquire), while ferrompi_op_set_closure writes them
+// atomically (release), establishing a happens-before relationship.
+static _Atomic(void*) op_closure_data[MAX_OPS];
+static _Atomic(void*) op_closure_vtbl[MAX_OPS];
 
 // Initialize tables
 static int tables_initialized = 0;
@@ -101,25 +111,29 @@ static void init_tables(void) {
     atomic_init(&next_request_hint, 0);
     for (int i = 0; i < MAX_WINDOWS; i++) {
         win_table[i] = MPI_WIN_NULL;
-        win_used[i] = 0;
+        atomic_init(&win_used[i], 0);
     }
+    atomic_init(&next_win_hint, 0);
     for (int i = 0; i < MAX_INFOS; i++) {
         info_table[i] = MPI_INFO_NULL;
-        info_used[i] = 0;
+        atomic_init(&info_used[i], 0);
     }
+    atomic_init(&next_info_hint, 0);
     for (int i = 0; i < MAX_GROUPS; i++) {
         group_table[i] = MPI_GROUP_EMPTY;
-        group_used[i] = 0;
+        atomic_init(&group_used[i], 0);
     }
+    atomic_init(&next_group_hint, 0);
     for (int i = 0; i < MAX_DATATYPES; i++) {
         datatype_table[i] = MPI_DATATYPE_NULL;
-        datatype_used[i] = 0;
+        atomic_init(&datatype_used[i], 0);
     }
+    atomic_init(&next_datatype_hint, 0);
     for (int i = 0; i < MAX_OPS; i++) {
         op_table[i] = MPI_OP_NULL;
         atomic_init(&op_used[i], 0);
-        op_closure_data[i] = NULL;
-        op_closure_vtbl[i] = NULL;
+        atomic_init(&op_closure_data[i], NULL);
+        atomic_init(&op_closure_vtbl[i], NULL);
     }
     atomic_init(&next_op_hint, 0);
     tables_initialized = 1;
@@ -197,92 +211,114 @@ static void free_request(int64_t handle) {
     }
 }
 
-// Allocate a window handle
+// Allocate a window handle (thread-safe via C11 CAS).
+// The hint is advisory: an inaccurate hint only lengthens the scan, never
+// produces an incorrect result.  acq_rel on the CAS prevents reordering of the
+// slot-claim with later operations on the same thread.
 static int32_t alloc_win(MPI_Win win) {
+    int hint = atomic_load_explicit(&next_win_hint, memory_order_relaxed);
     for (int i = 0; i < MAX_WINDOWS; i++) {
-        int idx = (next_win_hint + i) % MAX_WINDOWS;
-        if (!win_used[idx]) {
+        int idx = (hint + i) % MAX_WINDOWS;
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &win_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
             win_table[idx] = win;
-            win_used[idx] = 1;
-            next_win_hint = (idx + 1) % MAX_WINDOWS;
+            atomic_store_explicit(&next_win_hint,
+                (idx + 1) % MAX_WINDOWS, memory_order_relaxed);
             return (int32_t)idx;
         }
     }
     return -1;  // No space
 }
 
-// Get MPI_Win from handle
+// Get MPI_Win from handle (thread-safe: acquire load pairs with the release
+// store in free_win).
 static MPI_Win get_win(int32_t handle) {
-    if (handle < 0 || handle >= MAX_WINDOWS || !win_used[handle]) {
+    if (handle < 0 || handle >= MAX_WINDOWS ||
+            !atomic_load_explicit(&win_used[handle], memory_order_acquire)) {
         return MPI_WIN_NULL;
     }
     return win_table[handle];
 }
 
-// Get MPI_Win pointer from handle (for operations that modify the win)
+// Get MPI_Win pointer from handle (for operations that modify the win).
+// Thread-safe via the same acquire/release protocol as get_win.
 static MPI_Win* get_win_ptr(int32_t handle) {
-    if (handle < 0 || handle >= MAX_WINDOWS || !win_used[handle]) {
+    if (handle < 0 || handle >= MAX_WINDOWS ||
+            !atomic_load_explicit(&win_used[handle], memory_order_acquire)) {
         return NULL;
     }
     return &win_table[handle];
 }
 
-// Free a window handle
+// Free a window handle (thread-safe: plain store to win_table happens-before
+// the release store to win_used, pairing with the acquire load in get_win).
 static void free_win(int32_t handle) {
     if (handle >= 0 && handle < MAX_WINDOWS) {
         win_table[handle] = MPI_WIN_NULL;
-        win_used[handle] = 0;
+        atomic_store_explicit(&win_used[handle], 0, memory_order_release);
     }
 }
 
-// Allocate an info handle
+// Allocate an info handle (thread-safe via C11 CAS, mirrors alloc_win).
 static int32_t alloc_info(MPI_Info info) {
+    int hint = atomic_load_explicit(&next_info_hint, memory_order_relaxed);
     for (int i = 0; i < MAX_INFOS; i++) {
-        int idx = (next_info_hint + i) % MAX_INFOS;
-        if (!info_used[idx]) {
+        int idx = (hint + i) % MAX_INFOS;
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &info_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
             info_table[idx] = info;
-            info_used[idx] = 1;
-            next_info_hint = (idx + 1) % MAX_INFOS;
+            atomic_store_explicit(&next_info_hint,
+                (idx + 1) % MAX_INFOS, memory_order_relaxed);
             return (int32_t)idx;
         }
     }
     return -1;  // No space
 }
 
-// Get MPI_Info from handle
+// Get MPI_Info from handle (thread-safe: acquire load pairs with release store
+// in free_info).
 static MPI_Info get_info(int32_t handle) {
-    if (handle < 0 || handle >= MAX_INFOS || !info_used[handle]) {
+    if (handle < 0 || handle >= MAX_INFOS ||
+            !atomic_load_explicit(&info_used[handle], memory_order_acquire)) {
         return MPI_INFO_NULL;
     }
     return info_table[handle];
 }
 
-// Free an info handle
+// Free an info handle (thread-safe: release store to info_used).
 static void free_info(int32_t handle) {
     if (handle >= 0 && handle < MAX_INFOS) {
         info_table[handle] = MPI_INFO_NULL;
-        info_used[handle] = 0;
+        atomic_store_explicit(&info_used[handle], 0, memory_order_release);
     }
 }
 
-// Allocate a group handle.
+// Allocate a group handle (thread-safe via C11 CAS, mirrors alloc_win).
 // Slot 0 is reserved for MPI_GROUP_EMPTY and must NOT be allocated via this
 // path; alloc_group starts scanning from hint > 0 by construction, but the
 // hint wraps around, so we explicitly skip slot 0.
 static int32_t alloc_group(MPI_Group group) {
+    int hint = atomic_load_explicit(&next_group_hint, memory_order_relaxed);
     for (int i = 0; i < MAX_GROUPS - 1; i++) {
-        int idx = (next_group_hint + i) % (MAX_GROUPS - 1) + 1;  // slots 1..MAX_GROUPS-1
-        if (!group_used[idx]) {
+        int idx = (hint + i) % (MAX_GROUPS - 1) + 1;  // slots 1..MAX_GROUPS-1
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &group_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
             group_table[idx] = group;
-            group_used[idx] = 1;
-            next_group_hint = (idx % (MAX_GROUPS - 1));  // advance hint within 1..MAX_GROUPS-1
+            atomic_store_explicit(&next_group_hint,
+                idx % (MAX_GROUPS - 1), memory_order_relaxed);
             return (int32_t)idx;
         }
     }
     return -1;  // No space
 }
 
-// Get MPI_Group from handle
+// Get MPI_Group from handle (thread-safe: acquire load).
 static MPI_Group get_group(int32_t handle) {
     if (handle < 0 || handle >= MAX_GROUPS) {
         return MPI_GROUP_EMPTY;
@@ -291,49 +327,55 @@ static MPI_Group get_group(int32_t handle) {
     if (handle == 0) {
         return MPI_GROUP_EMPTY;
     }
-    if (!group_used[handle]) {
+    if (!atomic_load_explicit(&group_used[handle], memory_order_acquire)) {
         return MPI_GROUP_EMPTY;
     }
     return group_table[handle];
 }
 
-// Free a group handle (does NOT call MPI_Group_free; callers do that)
+// Free a group handle (thread-safe: release store; does NOT call MPI_Group_free).
 static void free_group(int32_t handle) {
     if (handle > 0 && handle < MAX_GROUPS) {
         group_table[handle] = MPI_GROUP_EMPTY;
-        group_used[handle] = 0;
+        atomic_store_explicit(&group_used[handle], 0, memory_order_release);
     }
 }
 
-// Allocate a custom datatype handle
+// Allocate a custom datatype handle (thread-safe via C11 CAS, mirrors alloc_win).
 static int32_t alloc_datatype(MPI_Datatype dtype) {
+    int hint = atomic_load_explicit(&next_datatype_hint, memory_order_relaxed);
     for (int i = 0; i < MAX_DATATYPES; i++) {
-        int idx = (next_datatype_hint + i) % MAX_DATATYPES;
-        if (!datatype_used[idx]) {
+        int idx = (hint + i) % MAX_DATATYPES;
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                &datatype_used[idx], &expected, 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
             datatype_table[idx] = dtype;
-            datatype_used[idx] = 1;
-            next_datatype_hint = (idx + 1) % MAX_DATATYPES;
+            atomic_store_explicit(&next_datatype_hint,
+                (idx + 1) % MAX_DATATYPES, memory_order_relaxed);
             return (int32_t)idx;
         }
     }
     return -1;  // No space
 }
 
-// Get a committed MPI_Datatype from a custom-datatype handle.
+// Get a committed MPI_Datatype from a custom-datatype handle (thread-safe: acquire load).
 // Named get_datatype_committed to avoid collision with the predefined-tag
 // helper get_datatype(int32_t tag) defined below.
 static MPI_Datatype get_datatype_committed(int32_t handle) {
-    if (handle < 0 || handle >= MAX_DATATYPES || !datatype_used[handle]) {
+    if (handle < 0 || handle >= MAX_DATATYPES ||
+            !atomic_load_explicit(&datatype_used[handle], memory_order_acquire)) {
         return MPI_DATATYPE_NULL;
     }
     return datatype_table[handle];
 }
 
-// Free a custom datatype handle slot (does NOT call MPI_Type_free; callers do that)
+// Free a custom datatype handle slot (thread-safe: release store;
+// does NOT call MPI_Type_free; callers do that).
 static void free_datatype_slot(int32_t handle) {
     if (handle >= 0 && handle < MAX_DATATYPES) {
         datatype_table[handle] = MPI_DATATYPE_NULL;
-        datatype_used[handle] = 0;
+        atomic_store_explicit(&datatype_used[handle], 0, memory_order_release);
     }
 }
 
@@ -462,34 +504,38 @@ int ferrompi_finalize(void) {
 
     // Clean up any remaining group objects (skip slot 0, which is MPI_GROUP_EMPTY)
     for (int i = 1; i < MAX_GROUPS; i++) {
-        if (group_used[i] && group_table[i] != MPI_GROUP_EMPTY) {
+        if (atomic_load_explicit(&group_used[i], memory_order_acquire) &&
+                group_table[i] != MPI_GROUP_EMPTY) {
             MPI_Group_free(&group_table[i]);
         }
-        group_used[i] = 0;
+        atomic_store_explicit(&group_used[i], 0, memory_order_release);
     }
 
     // Clean up any remaining info objects
     for (int i = 0; i < MAX_INFOS; i++) {
-        if (info_used[i] && info_table[i] != MPI_INFO_NULL) {
+        if (atomic_load_explicit(&info_used[i], memory_order_acquire) &&
+                info_table[i] != MPI_INFO_NULL) {
             MPI_Info_free(&info_table[i]);
         }
-        info_used[i] = 0;
+        atomic_store_explicit(&info_used[i], 0, memory_order_release);
     }
 
     // Clean up any remaining custom datatypes
     for (int i = 0; i < MAX_DATATYPES; i++) {
-        if (datatype_used[i] && datatype_table[i] != MPI_DATATYPE_NULL) {
+        if (atomic_load_explicit(&datatype_used[i], memory_order_acquire) &&
+                datatype_table[i] != MPI_DATATYPE_NULL) {
             MPI_Type_free(&datatype_table[i]);
         }
-        datatype_used[i] = 0;
+        atomic_store_explicit(&datatype_used[i], 0, memory_order_release);
     }
 
     // Clean up any remaining windows (before communicators, since windows reference comms)
     for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (win_used[i] && win_table[i] != MPI_WIN_NULL) {
+        if (atomic_load_explicit(&win_used[i], memory_order_acquire) &&
+                win_table[i] != MPI_WIN_NULL) {
             MPI_Win_free(&win_table[i]);
         }
-        win_used[i] = 0;
+        atomic_store_explicit(&win_used[i], 0, memory_order_release);
     }
 
     // Clean up any remaining communicators
@@ -3493,6 +3539,9 @@ int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_h
     MPI_Win win;
     int ret = MPI_Win_allocate_shared((MPI_Aint)size, disp_unit, info, comm, baseptr, &win);
     if (ret == MPI_SUCCESS) {
+        /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
+         * aborting the process (mirrors the communicator error-handler pattern). */
+        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -3511,6 +3560,9 @@ int ferrompi_win_create(void* base, int64_t size, int32_t disp_unit, int32_t inf
     MPI_Win win;
     int ret = MPI_Win_create(base, (MPI_Aint)size, disp_unit, info, comm, &win);
     if (ret == MPI_SUCCESS) {
+        /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
+         * aborting the process (mirrors the communicator error-handler pattern). */
+        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -3529,6 +3581,9 @@ int ferrompi_win_allocate(int64_t size, int32_t disp_unit, int32_t info_handle,
     MPI_Win win;
     int ret = MPI_Win_allocate((MPI_Aint)size, disp_unit, info, comm, baseptr, &win);
     if (ret == MPI_SUCCESS) {
+        /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
+         * aborting the process (mirrors the communicator error-handler pattern). */
+        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -4388,8 +4443,10 @@ static int32_t alloc_op_slot(void) {
 static void free_op_slot(int32_t slot) {
     if (slot >= 0 && slot < MAX_OPS) {
         op_table[slot] = MPI_OP_NULL;
-        op_closure_data[slot] = NULL;
-        op_closure_vtbl[slot] = NULL;
+        /* Release stores: any thread that later acquires op_used == 0 will also
+         * observe the NULL closure pointers (no dangling pointer visible). */
+        atomic_store_explicit(&op_closure_data[slot], NULL, memory_order_release);
+        atomic_store_explicit(&op_closure_vtbl[slot], NULL, memory_order_release);
         atomic_store_explicit(&op_used[slot], 0, memory_order_release);
     }
 }
@@ -4414,13 +4471,20 @@ static int ferrompi_tag_from_mpi_dt(MPI_Datatype dt) {
     return -1;
 }
 
-/* Central dispatch — called by every trampoline. */
+/* Central dispatch — called by every trampoline.
+ *
+ * Under MPI_THREAD_MULTIPLE, MPI can invoke this from any thread while another
+ * thread is registering a new UserOp via ferrompi_op_set_closure.  Reading
+ * op_closure_data/vtbl with acquire semantics pairs with the release writes in
+ * ferrompi_op_set_closure, ensuring we never observe a stale (NULL) pointer
+ * after the closure has been registered. */
 static void ferrompi_invoke_user_op(int slot,
                                      void* invec, void* inoutvec,
                                      int* len, MPI_Datatype* dt) {
     int dt_tag = ferrompi_tag_from_mpi_dt(*dt);
-    rust_user_op_invoke(op_closure_data[slot], op_closure_vtbl[slot],
-                        invec, inoutvec, *len, dt_tag);
+    void* data = atomic_load_explicit(&op_closure_data[slot], memory_order_acquire);
+    void* vtbl = atomic_load_explicit(&op_closure_vtbl[slot], memory_order_acquire);
+    rust_user_op_invoke(data, vtbl, invec, inoutvec, *len, dt_tag);
 }
 
 /* ---- 16 distinct trampoline functions (ADR-0005 Decision 5) ---- */
@@ -4481,10 +4545,14 @@ int ferrompi_op_alloc_slot(int32_t* out_slot) {
 
 /* Register a Rust fat pointer (data+vtable) for the given slot.
  * Must be called after ferrompi_op_alloc_slot and before
- * ferrompi_op_create_user. */
+ * ferrompi_op_create_user.
+ *
+ * Release stores pair with the acquire loads in ferrompi_invoke_user_op,
+ * ensuring that any thread that observes the closure via the trampoline also
+ * observes all writes made before this call. */
 void ferrompi_op_set_closure(int32_t slot, void* data, void* vtbl) {
-    op_closure_data[slot] = data;
-    op_closure_vtbl[slot] = vtbl;
+    atomic_store_explicit(&op_closure_data[slot], data, memory_order_release);
+    atomic_store_explicit(&op_closure_vtbl[slot], vtbl, memory_order_release);
 }
 
 /* Create an MPI_Op for the given slot; commute=1 → commutative.

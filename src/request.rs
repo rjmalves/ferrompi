@@ -74,10 +74,13 @@ impl Request {
         if self.completed {
             return Ok(());
         }
-        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
-        Error::check_with_op(ret, "wait")?;
+        // Mark completed BEFORE the FFI call so that Drop does not attempt a
+        // second MPI_Wait on error.  A request handed to MPI_Wait is consumed
+        // by MPI regardless of whether MPI reports an error; re-waiting on it
+        // would be a use-after-free of the request handle.
         self.completed = true;
-        Ok(())
+        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
+        Error::check_with_op(ret, "wait")
     }
 
     /// Test if this operation has completed without blocking.

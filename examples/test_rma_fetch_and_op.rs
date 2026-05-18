@@ -13,7 +13,7 @@
 //!
 //! Run with: mpiexec -n 2 ./target/debug/examples/test_rma_fetch_and_op
 
-use ferrompi::{Mpi, ReduceOp, Win, WinFenceAssert};
+use ferrompi::{Mpi, PendingFetchResult, ReduceOp, Win, WinFenceAssert};
 
 fn main() {
     let mpi = Mpi::init().expect("MPI init failed");
@@ -63,10 +63,12 @@ fn main() {
         win.fence(WinFenceAssert::default())
             .expect("test 1 opening fence failed");
 
-        let mut old = 0i32;
+        // fetch_and_op returns a PendingFetchResult — result is not yet
+        // populated; must call .resolve() only after the epoch closes.
+        let mut pending: Option<PendingFetchResult<i32>> = None;
         if rank == 0 {
             match win.fetch_and_op(1i32, 1, 0, ReduceOp::Sum) {
-                Ok(v) => old = v,
+                Ok(p) => pending = Some(p),
                 Err(e) => {
                     eprintln!("FAIL: rank 0 Win::fetch_and_op Sum returned error: {e}");
                     local_ok = false;
@@ -74,8 +76,15 @@ fn main() {
             }
         }
 
+        // Close the epoch — MPI_Fetch_and_op completes here.
         win.fence(WinFenceAssert::default())
             .expect("test 1 closing fence failed");
+
+        // SAFETY: epoch is closed; the result buffer is now populated.
+        let mut old = 0i32;
+        if let Some(p) = pending {
+            old = unsafe { p.resolve() };
+        }
 
         if rank == 0 && old != 100 {
             eprintln!("FAIL: rank 0 old value after Sum: expected 100, got {old}");
@@ -112,10 +121,12 @@ fn main() {
         win.fence(WinFenceAssert::default())
             .expect("test 2 opening fence failed");
 
-        let mut old = 0i32;
+        // fetch_and_op returns a PendingFetchResult — result is not yet
+        // populated; must call .resolve() only after the epoch closes.
+        let mut pending: Option<PendingFetchResult<i32>> = None;
         if rank == 0 {
             match win.fetch_and_op(999i32, 1, 0, ReduceOp::Replace) {
-                Ok(v) => old = v,
+                Ok(p) => pending = Some(p),
                 Err(e) => {
                     eprintln!("FAIL: rank 0 Win::fetch_and_op Replace returned error: {e}");
                     local_ok = false;
@@ -123,8 +134,15 @@ fn main() {
             }
         }
 
+        // Close the epoch — MPI_Fetch_and_op completes here.
         win.fence(WinFenceAssert::default())
             .expect("test 2 closing fence failed");
+
+        // SAFETY: epoch is closed; the result buffer is now populated.
+        let mut old = 0i32;
+        if let Some(p) = pending {
+            old = unsafe { p.resolve() };
+        }
 
         if rank == 0 && old != 42 {
             eprintln!("FAIL: rank 0 old value after Replace: expected 42, got {old}");
