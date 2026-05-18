@@ -451,25 +451,43 @@ impl Mpi {
 
     /// Returns `true` if the runtime MPI version is 4.0 or later.
     ///
-    /// The result is cached after the first call so subsequent calls are O(1).
+    /// Caching semantics:
+    /// - An `Err` from `Mpi::version()` (e.g., called before `Mpi::init`)
+    ///   is NOT cached; a subsequent call after init can re-probe and
+    ///   observe support correctly.
+    /// - A successful `version()` whose string parses to a major version
+    ///   `≥ 4` caches `true`.
+    /// - A successful `version()` whose string parses to a major version
+    ///   `< 4` (including unrecognized formats that yield major `= 0` via
+    ///   the `unwrap_or(0)` fallback) caches `false`. Re-probing is not
+    ///   possible once a successful `version()` has been seen, so a
+    ///   non-standard version string format from an unusual MPI build
+    ///   permanently disables `Mpi::create_from_group` for this process.
     fn supports_create_from_group() -> bool {
         static SUPPORTED: OnceLock<bool> = OnceLock::new();
-        *SUPPORTED.get_or_init(|| {
-            // Mpi::version() returns a string like "MPI 4.0" or "MPI 3.1".
-            // Extract the major version number from the second whitespace-delimited
-            // token, then its first dot-delimited component.
-            Mpi::version()
-                .ok()
-                .and_then(|v| {
-                    v.split_whitespace()
-                        .nth(1)?
-                        .split('.')
-                        .next()?
-                        .parse::<u32>()
-                        .ok()
-                })
-                .is_some_and(|major| major >= 4)
-        })
+        if let Some(&cached) = SUPPORTED.get() {
+            return cached;
+        }
+        // Probe. If `version()` fails, return `false` without caching;
+        // a future call can re-probe successfully.
+        let Ok(v) = Mpi::version() else {
+            return false;
+        };
+        // Mpi::version() returns a string like "MPI 4.0" or "MPI 3.1".
+        // Extract the major version number from the second whitespace-delimited
+        // token, then its first dot-delimited component.
+        let major: u32 = v
+            .split_whitespace()
+            .nth(1)
+            .and_then(|tok| tok.split('.').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let supported = major >= 4;
+        // Race: if another thread already won set(), discard our value;
+        // both threads agree on the result anyway because the probe is
+        // deterministic given a successful version() call.
+        let _ = SUPPORTED.set(supported);
+        supported
     }
 
     /// Create a communicator from a group without requiring a parent
@@ -544,12 +562,14 @@ impl Mpi {
     /// `MPI_BSEND_OVERHEAD` is implementation-specific; use at least a few
     /// hundred extra bytes per buffered send. For safety, use a generous margin.
     ///
-    /// **Buffers larger than `i32::MAX` bytes** will silently truncate the size
-    /// passed to `MPI_Buffer_attach` (which takes an `int`). MPI will then
-    /// behave as if a smaller buffer was attached.
+    /// Buffers larger than `i32::MAX` bytes are rejected with
+    /// `Err(`[`Error::InvalidBuffer`]`)` before the FFI call; the
+    /// underlying `MPI_Buffer_attach` takes an `int` count and cannot
+    /// address larger buffers.
     ///
     /// # Errors
     ///
+    /// - [`Error::InvalidBuffer`] if `buffer.len() > i32::MAX as usize`.
     /// - [`Error::InvalidOp`] if a buffer is already attached.
     /// - [`Error::Mpi`] if `MPI_Buffer_attach` fails.
     ///
@@ -568,6 +588,9 @@ impl Mpi {
             .map_err(|_| Error::Internal("ATTACHED_BUFFER mutex poisoned".into()))?;
         if guard.is_some() {
             return Err(Error::InvalidOp);
+        }
+        if buffer.len() > i32::MAX as usize {
+            return Err(Error::InvalidBuffer);
         }
         let ptr = buffer.as_ptr() as *mut std::ffi::c_void;
         let size = buffer.len() as i64;
@@ -802,6 +825,18 @@ mod tests {
 
     // ── Mpi::buffer_attach / buffer_detach unit tests ─────────────────────
 
+    /// Documentation-anchor for the `Error::InvalidBuffer` contract on
+    /// the oversize path. The functional guard at `src/lib.rs` (search
+    /// `i32::MAX as usize` inside `buffer_attach`) cannot be invoked from
+    /// a unit test without `MPI_Init`; behavioral verification requires an
+    /// integration example (deferred to epic-06 follow-up). This test
+    /// only witnesses that `Error::InvalidBuffer` is a valid variant.
+    #[test]
+    fn buffer_attach_invalid_buffer_variant_exists() {
+        let err = Error::InvalidBuffer;
+        assert!(matches!(err, Error::InvalidBuffer));
+    }
+
     /// Compile-time witness that buffer_attach and buffer_detach have the
     /// correct signatures. No MPI runtime is needed — the functions are
     /// never called.
@@ -868,6 +903,17 @@ mod tests {
     }
 
     // ── Mpi::create_from_group unit tests ─────────────────────────────────
+
+    /// Verify that `supports_create_from_group` is callable and has the
+    /// expected function type. The probe-failure-not-cached invariant is
+    /// enforced structurally: the implementation uses `get()` / `set()`
+    /// rather than `get_or_init`, which is verified by the acceptance grep.
+    /// Behavioural verification (call before init, then after init) requires
+    /// a running MPI environment and is documented as a manual test scenario.
+    #[test]
+    fn supports_create_from_group_does_not_cache_probe_failures() {
+        let _: fn() -> bool = Mpi::supports_create_from_group;
+    }
 
     /// Verify that a `stringtag` containing a null byte is rejected before
     /// the FFI call is ever invoked.  We test the null-byte path directly

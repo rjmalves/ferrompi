@@ -228,11 +228,16 @@ impl Error {
     /// Calls `ferrompi_error_info` to obtain the error class and human-readable
     /// message from the MPI runtime.
     ///
-    /// # Panics
+    /// # Returns
     ///
-    /// Panics if called with `MPI_SUCCESS` (code 0).
+    /// If called with `MPI_SUCCESS` (code 0), returns
+    /// `Error::Internal("from_code called with success code 0")`.
+    /// Callers should use [`Error::check`] or [`Error::check_with_op`]
+    /// for the standard "Ok on success, Err on failure" idiom.
     pub fn from_code(code: i32) -> Self {
-        assert!(code != 0, "from_code called with success code 0");
+        if code == 0 {
+            return Error::Internal("from_code called with success code 0".into());
+        }
 
         let mut class: i32 = 0;
         let mut msg_buf = [0u8; 512];
@@ -275,9 +280,21 @@ impl Error {
     /// Some(operation)` on the resulting [`Error::Mpi`] variant, so callers can
     /// record which ferrompi wrapper produced the error.
     ///
-    /// # Panics
+    /// # Contract
     ///
-    /// Panics if called with `MPI_SUCCESS` (code 0), just like `from_code`.
+    /// Callers must not pass `code = 0`. The canonical success-vs-error
+    /// idiom is [`Error::check_with_op`], which short-circuits to `Ok(())`
+    /// when `code == 0`. Passing 0 here returns `Error::Internal("from_code
+    /// called with success code 0")` as a defensive fallback — this signals
+    /// a misuse of the API, not an MPI error condition.
+    ///
+    /// # Returns
+    ///
+    /// - `Error::Mpi { .. }` for any non-zero MPI error code, with the
+    ///   `operation` field populated.
+    /// - `Error::Internal` if called with `code = 0` (delegated from
+    ///   [`Error::from_code`]; treat this as a programming error in the
+    ///   caller, not a runtime MPI failure).
     pub fn from_code_with_op(code: i32, operation: &'static str) -> Self {
         match Error::from_code(code) {
             Error::Mpi {
@@ -291,7 +308,8 @@ impl Error {
                 message,
                 operation: Some(operation),
             },
-            // SAFETY: from_code always returns Error::Mpi for non-zero codes.
+            // from_code returns Error::Mpi for non-zero codes and Error::Internal
+            // for code 0. Both are preserved verbatim here.
             other => other,
         }
     }
@@ -570,6 +588,17 @@ mod tests {
             format!("{err}"),
             "MPI error: invalid rank (class=ERR_RANK, code=6)"
         );
+    }
+
+    #[test]
+    fn from_code_with_zero_returns_internal_error() {
+        let err = Error::from_code(0);
+        match err {
+            Error::Internal(msg) => {
+                assert_eq!(msg, "from_code called with success code 0");
+            }
+            other => panic!("expected Error::Internal, got {other:?}"),
+        }
     }
 
     #[test]

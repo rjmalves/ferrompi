@@ -28,6 +28,11 @@ impl Communicator {
     /// * `displs` - Displacement in `recv` for data from each rank
     /// * `root` - Rank of the root process
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `recvcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -54,6 +59,9 @@ impl Communicator {
         displs: &[i32],
         root: i32,
     ) -> Result<()> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let ret = unsafe {
             ffi::ferrompi_gatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -84,6 +92,11 @@ impl Communicator {
     /// * `recv` - Buffer for received data
     /// * `root` - Rank of the root process
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `sendcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -109,6 +122,9 @@ impl Communicator {
         recv: &mut [T],
         root: i32,
     ) -> Result<()> {
+        if sendcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let ret = unsafe {
             ffi::ferrompi_scatterv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -138,6 +154,11 @@ impl Communicator {
     /// * `recvcounts` - Number of elements received from each rank
     /// * `displs` - Displacement in `recv` for data from each rank
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `recvcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -162,6 +183,9 @@ impl Communicator {
         recvcounts: &[i32],
         displs: &[i32],
     ) -> Result<()> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let ret = unsafe {
             ffi::ferrompi_allgatherv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -192,6 +216,12 @@ impl Communicator {
     /// * `recvcounts` - Number of elements to receive from each rank
     /// * `rdispls` - Receive displacement for each rank
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `sendcounts.len() != sdispls.len()` or
+    ///   `recvcounts.len() != rdispls.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -216,6 +246,9 @@ impl Communicator {
         recvcounts: &[i32],
         rdispls: &[i32],
     ) -> Result<()> {
+        if sendcounts.len() != sdispls.len() || recvcounts.len() != rdispls.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let ret = unsafe {
             ffi::ferrompi_alltoallv(
                 send.as_ptr().cast::<std::ffi::c_void>(),
@@ -248,6 +281,11 @@ impl Communicator {
     /// * `displs` - Displacement in `recv` for data from each rank
     /// * `root` - Rank of the root process
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `recvcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -274,6 +312,9 @@ impl Communicator {
         displs: &[i32],
         root: i32,
     ) -> Result<Request> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
             ffi::ferrompi_igatherv(
@@ -305,6 +346,11 @@ impl Communicator {
     /// * `displs` - Displacement in `send` for data to each rank
     /// * `root` - Rank of the root process
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `sendcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -331,6 +377,9 @@ impl Communicator {
         displs: &[i32],
         root: i32,
     ) -> Result<Request> {
+        if sendcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
             ffi::ferrompi_iscatterv(
@@ -361,6 +410,11 @@ impl Communicator {
     /// * `recvcounts` - Number of elements received from each rank
     /// * `displs` - Displacement in `recv` for data from each rank
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `recvcounts.len() != displs.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -386,6 +440,9 @@ impl Communicator {
         recvcounts: &[i32],
         displs: &[i32],
     ) -> Result<Request> {
+        if recvcounts.len() != displs.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
             ffi::ferrompi_iallgatherv(
@@ -417,6 +474,12 @@ impl Communicator {
     /// * `recvcounts` - Number of elements to receive from each rank
     /// * `rdispls` - Receive displacement for each rank
     ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `sendcounts.len() != sdispls.len()` or
+    ///   `recvcounts.len() != rdispls.len()`.
+    /// - [`Error::Mpi`] if the underlying MPI call fails.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -442,6 +505,9 @@ impl Communicator {
         recvcounts: &[i32],
         rdispls: &[i32],
     ) -> Result<Request> {
+        if sendcounts.len() != sdispls.len() || recvcounts.len() != rdispls.len() {
+            return Err(Error::InvalidBuffer);
+        }
         let mut request_handle: i64 = 0;
         let ret = unsafe {
             ffi::ferrompi_ialltoallv(
@@ -781,6 +847,154 @@ mod tests {
             &sendcounts,
             &sdispls,
             &mut recv,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    // ── blocking / nonblocking v-collective length-mismatch guards ────────
+
+    #[test]
+    fn gatherv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.gatherv(&send, &mut recv, &recvcounts, &displs, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn scatterv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 10];
+        let result = comm.scatterv(&send, &sendcounts, &displs, &mut recv, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn allgatherv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.allgatherv(&send, &mut recv, &recvcounts, &displs);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoallv_mismatched_send_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20, 30];
+        let result = comm.alltoallv(
+            &send,
+            &sendcounts,
+            &sdispls,
+            &mut recv,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn alltoallv_mismatched_recv_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20, 30];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.alltoallv(
+            &send,
+            &sendcounts,
+            &sdispls,
+            &mut recv,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn igatherv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.igatherv(&send, &mut recv, &recvcounts, &displs, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn iscatterv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 10];
+        let result = comm.iscatterv(&send, &mut recv, &sendcounts, &displs, 0);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn iallgatherv_mismatched_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 10];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let displs = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.iallgatherv(&send, &mut recv, &recvcounts, &displs);
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn ialltoallv_mismatched_send_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20, 30];
+        let result = comm.ialltoallv(
+            &send,
+            &mut recv,
+            &sendcounts,
+            &sdispls,
+            &recvcounts,
+            &rdispls,
+        );
+        assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn ialltoallv_mismatched_recv_counts_displs_returns_invalid_buffer() {
+        let comm = dummy_comm();
+        let send = vec![1.0f64; 40];
+        let sendcounts = vec![10i32; 4];
+        let sdispls = vec![0i32, 10, 20, 30];
+        let mut recv = vec![0.0f64; 40];
+        let recvcounts = vec![10i32; 4];
+        let rdispls = vec![0i32, 10, 20]; // 3 elements != 4
+        let result = comm.ialltoallv(
+            &send,
+            &mut recv,
+            &sendcounts,
+            &sdispls,
             &recvcounts,
             &rdispls,
         );
