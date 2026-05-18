@@ -219,6 +219,9 @@ run_test test_persistent_rsend 2
 run_test test_persistent_ssend 2
 run_test test_persistent_bsend 2
 run_test test_persistent_count_overflow 2
+run_test test_waitall_count_overflow 2
+run_test test_get_group_invalid_handle 2
+run_test test_create_from_group_null_handle 2
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"

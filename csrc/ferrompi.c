@@ -85,8 +85,22 @@ static atomic_int next_datatype_hint;
 // Maximum number of concurrent user-defined MPI_Op objects
 #define MAX_OPS 16
 
-// User-defined op table (populated by ferrompi_op_create_user)
-static MPI_Op op_table[MAX_OPS];
+// User-defined op table.  _Atomic(MPI_Op) provides happens-before ordering for
+// the MPI_Op payload across the four access sites:
+//   - WRITER ferrompi_op_create_user (csrc/ferrompi.c:~4686):
+//       atomic_store_explicit(release) after MPI_Op_create.
+//   - WRITER free_op_slot (csrc/ferrompi.c:~4568):
+//       atomic_store_explicit(release) of MPI_OP_NULL.
+//   - WRITER ferrompi_op_free (csrc/ferrompi.c:~4699):
+//       stages through a local; loads (acquire), invokes MPI_Op_free
+//       on the local, stores (release) the result back.
+//   - READER ferrompi_allreduce_user_op (csrc/ferrompi.c:~4726):
+//       atomic_load_explicit(acquire) before the MPI_Allreduce call.
+// The acquire/release pairing guarantees that any thread observing
+// op_used[h] == 1 (via the existing op_used acquire protocol) and then
+// loading op_table[h] sees either the valid post-create MPI_Op or
+// MPI_OP_NULL (post-free), never a torn value.
+static _Atomic(MPI_Op) op_table[MAX_OPS];
 static atomic_int op_used[MAX_OPS];  // 1 if slot is in use
 static atomic_int next_op_hint;
 
@@ -99,12 +113,29 @@ static atomic_int next_op_hint;
 static _Atomic(void*) op_closure_data[MAX_OPS];
 static _Atomic(void*) op_closure_vtbl[MAX_OPS];
 
-// Initialize tables
-static int tables_initialized = 0;
+// Initialization guard.  CAS-based: exactly one thread performs the
+// atomic_init loops below; concurrent callers see the CAS fail and return
+// immediately.  Memory-ordering rationale: C11 §6.7.4 guarantees static
+// storage duration objects are zero-initialized at program load, so the
+// atomic_init loop only restates that zero state.  Losing threads return
+// after observing tables_initialized == 1 and rely on the pre-load static
+// zero-init as the baseline — no synchronizes-with edge is required for
+// the loop body's stores because the values being written are already the
+// observable state.  If any future revision ever writes a non-zero value
+// in the init loop, a release fence (e.g. atomic_thread_fence(release))
+// must be inserted before the CAS, or the non-zero init must move into
+// each call site of get_*.  Reset to 0 by ferrompi_finalize via a release
+// store so a subsequent re-init (e.g. test harness) sees a clean zero.
+static atomic_int tables_initialized;
 
 static void init_tables(void) {
-    if (tables_initialized) return;
-    
+    int expected = 0;
+    if (!atomic_compare_exchange_strong_explicit(
+            &tables_initialized, &expected, 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+        return;  /* another thread already initialized */
+    }
+
     // Note: MPI_COMM_WORLD must be set AFTER MPI_Init is called
     // comm_table[0] will be set in ferrompi_init* functions; comm_used[0] is
     // set to 1 there as well, immediately after MPI_COMM_WORLD is assigned.
@@ -139,13 +170,13 @@ static void init_tables(void) {
     }
     atomic_init(&next_datatype_hint, 0);
     for (int i = 0; i < MAX_OPS; i++) {
-        op_table[i] = MPI_OP_NULL;
+        atomic_init(&op_table[i], MPI_OP_NULL);
         atomic_init(&op_used[i], 0);
         atomic_init(&op_closure_data[i], NULL);
         atomic_init(&op_closure_vtbl[i], NULL);
     }
     atomic_init(&next_op_hint, 0);
-    tables_initialized = 1;
+    /* No trailing tables_initialized = 1; — the CAS above already set it. */
 }
 
 // Get MPI_Comm from handle (thread-safe: acquire load pairs with the release
@@ -351,17 +382,31 @@ static int32_t alloc_group(MPI_Group group) {
     return -1;  // No space
 }
 
-// Get MPI_Group from handle (thread-safe: acquire load).
+/* Get MPI_Group from handle (thread-safe: acquire load).
+ *
+ * Sentinel contract (depended on by all callers in this file):
+ *   handle == 0                → MPI_GROUP_EMPTY (the reserved lazy slot)
+ *   handle out of range        → MPI_GROUP_NULL  (invalid handle error)
+ *   handle in range, unused    → MPI_GROUP_NULL  (handle was freed)
+ *   handle in range, used      → group_table[handle]
+ *
+ * The MPI_GROUP_NULL sentinel pairs with the
+ *   `if (g == MPI_GROUP_NULL) return MPI_ERR_ARG;`
+ * guards at ferrompi_comm_create_from_group_parent (line ~723),
+ * ferrompi_comm_create_from_group (line ~743), and the group-operation
+ * shims at lines ~3216-3338.  Callers without that guard (group_incl,
+ * group_excl, group_size, group_rank) correctly defer to MPI's own
+ * MPI_ERR_GROUP for invalid handles. */
 static MPI_Group get_group(int32_t handle) {
-    if (handle < 0 || handle >= MAX_GROUPS) {
-        return MPI_GROUP_EMPTY;
-    }
     // Slot 0: lazily return MPI_GROUP_EMPTY (always valid post-init)
     if (handle == 0) {
         return MPI_GROUP_EMPTY;
     }
+    if (handle < 0 || handle >= MAX_GROUPS) {
+        return MPI_GROUP_NULL;
+    }
     if (!atomic_load_explicit(&group_used[handle], memory_order_acquire)) {
-        return MPI_GROUP_EMPTY;
+        return MPI_GROUP_NULL;
     }
     return group_table[handle];
 }
@@ -464,6 +509,12 @@ static MPI_Datatype get_datatype(int32_t tag) {
  * creates or adopts an MPI_Comm before handing it to Rust. */
 static int install_errors_return(MPI_Comm comm) {
     return MPI_Comm_set_errhandler(comm, MPI_ERRORS_RETURN);
+}
+
+/* Mirrors install_errors_return for MPI_Win.  Used by the three Win
+ * creators so that RMA errors return rather than abort. */
+static int install_errors_return_win(MPI_Win win) {
+    return MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
 }
 
 /* ============================================================
@@ -582,7 +633,7 @@ int ferrompi_finalize(void) {
         }
     }
     
-    tables_initialized = 0;
+    atomic_store_explicit(&tables_initialized, 0, memory_order_release);
     return MPI_Finalize();
 }
 
@@ -739,6 +790,15 @@ int ferrompi_comm_create_from_group(int32_t group_h,
     int ret = MPI_Comm_create_from_group(g, stringtag, MPI_INFO_NULL,
                                          MPI_ERRORS_RETURN, &new_comm);
     if (ret != MPI_SUCCESS) return ret;
+    /* MPI 4.0 §7.4.3: MPI_Comm_create_from_group returns MPI_COMM_NULL on
+     * ranks not in the supplied group.  v0.4.1 surfaces this as
+     * Err(MpiErrorClass::Other) rather than Ok(None); a future v0.5 change
+     * should move Mpi::create_from_group to Result<Option<Communicator>> for
+     * symmetry with the MPI-3 parent variant (Communicator::create_from_group).
+     * See ADR-0005 for the v0.5 follow-up. */
+    if (new_comm == MPI_COMM_NULL) {
+        return MPI_ERR_OTHER;
+    }
     /* MPI_ERRORS_RETURN already installed via the errhandler argument;
      * call install_errors_return defensively to ensure consistency
      * with all other comm-creating shims (epic-02 invariant). */
@@ -1098,13 +1158,16 @@ int ferrompi_reduce_inplace(void* buf, int64_t count, int32_t datatype_tag,
 #endif
         return MPI_Reduce(MPI_IN_PLACE, buf, (int)count, dt, mpi_op, root, comm);
     } else {
-        /* Non-root sends buf, recvbuf is ignored */
+        /* Non-root: recvbuf is "not significant" per MPI 4.0 §6.10 (and MPI 3.1
+         * §5.9.4) but strict MPI builds (Intel MPI debug, MPICH --enable-strict)
+         * reject NULL.  Pass buf as both sendbuf and recvbuf for portability;
+         * MPI ignores recvbuf at non-root, so the computation is unaffected. */
 #if MPI_VERSION >= 4
         if (count > INT_MAX) {
-            return MPI_Reduce_c(buf, NULL, (MPI_Count)count, dt, mpi_op, root, comm);
+            return MPI_Reduce_c(buf, buf, (MPI_Count)count, dt, mpi_op, root, comm);
         }
 #endif
-        return MPI_Reduce(buf, NULL, (int)count, dt, mpi_op, root, comm);
+        return MPI_Reduce(buf, buf, (int)count, dt, mpi_op, root, comm);
     }
 }
 
@@ -3077,7 +3140,9 @@ int ferrompi_info_create(int32_t* info_handle) {
 }
 
 int ferrompi_info_free(int32_t info_handle) {
-    if (info_handle < 0 || info_handle >= MAX_INFOS || !info_used[info_handle]) {
+    if (info_handle < 0 || info_handle >= MAX_INFOS ||
+            !atomic_load_explicit(&info_used[info_handle],
+                                  memory_order_acquire)) {
         return MPI_SUCCESS;
     }
     int ret = MPI_Info_free(&info_table[info_handle]);
@@ -3177,7 +3242,9 @@ int ferrompi_group_free(int32_t group_handle) {
     if (group_handle <= 0) {
         return MPI_SUCCESS;
     }
-    if (group_handle >= MAX_GROUPS || !group_used[group_handle]) {
+    if (group_handle >= MAX_GROUPS ||
+            !atomic_load_explicit(&group_used[group_handle],
+                                  memory_order_acquire)) {
         return MPI_SUCCESS;
     }
     int ret = MPI_Group_free(&group_table[group_handle]);
@@ -3390,11 +3457,12 @@ int ferrompi_test(int64_t request_handle, int32_t* flag) {
 
 int ferrompi_waitall(int64_t count, int64_t* request_handles) {
     if (count <= 0) return MPI_SUCCESS;
-    
+    if (count > INT_MAX) return MPI_ERR_COUNT;
+
     // Allocate temporary array of MPI_Request pointers
     MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
     if (!reqs) return MPI_ERR_OTHER;
-    
+
     for (int64_t i = 0; i < count; i++) {
         MPI_Request* req = get_request_ptr(request_handles[i]);
         if (!req) {
@@ -3403,11 +3471,7 @@ int ferrompi_waitall(int64_t count, int64_t* request_handles) {
         }
         reqs[i] = *req;
     }
-    
-    if (count > INT_MAX) {
-        free(reqs);
-        return MPI_ERR_COUNT;
-    }
+
     int ret = MPI_Waitall((int)count, reqs, MPI_STATUSES_IGNORE);
     
     // Only update handles and free slots on success
@@ -3435,6 +3499,7 @@ int ferrompi_start(int64_t request_handle) {
 
 int ferrompi_startall(int64_t count, int64_t* request_handles) {
     if (count <= 0) return MPI_SUCCESS;
+    if (count > INT_MAX) return MPI_ERR_COUNT;
 
     MPI_Request* reqs = (MPI_Request*)malloc(count * sizeof(MPI_Request));
     if (!reqs) return MPI_ERR_NO_MEM;
@@ -3448,10 +3513,6 @@ int ferrompi_startall(int64_t count, int64_t* request_handles) {
         reqs[i] = *req;
     }
 
-    if (count > INT_MAX) {
-        free(reqs);
-        return MPI_ERR_COUNT;
-    }
     int ret = MPI_Startall((int)count, reqs);
 
     // Update handles with post-start state
@@ -3648,7 +3709,11 @@ int ferrompi_win_allocate_shared(int64_t size, int32_t disp_unit, int32_t info_h
     if (ret == MPI_SUCCESS) {
         /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
          * aborting the process (mirrors the communicator error-handler pattern). */
-        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
+        int eh_ret = install_errors_return_win(win);
+        if (eh_ret != MPI_SUCCESS) {
+            MPI_Win_free(&win);
+            return eh_ret;
+        }
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -3669,7 +3734,11 @@ int ferrompi_win_create(void* base, int64_t size, int32_t disp_unit, int32_t inf
     if (ret == MPI_SUCCESS) {
         /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
          * aborting the process (mirrors the communicator error-handler pattern). */
-        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
+        int eh_ret = install_errors_return_win(win);
+        if (eh_ret != MPI_SUCCESS) {
+            MPI_Win_free(&win);
+            return eh_ret;
+        }
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -3690,7 +3759,11 @@ int ferrompi_win_allocate(int64_t size, int32_t disp_unit, int32_t info_handle,
     if (ret == MPI_SUCCESS) {
         /* Install MPI_ERRORS_RETURN so RMA errors are returned rather than
          * aborting the process (mirrors the communicator error-handler pattern). */
-        MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
+        int eh_ret = install_errors_return_win(win);
+        if (eh_ret != MPI_SUCCESS) {
+            MPI_Win_free(&win);
+            return eh_ret;
+        }
         *win_handle = alloc_win(win);
         if (*win_handle < 0) {
             MPI_Win_free(&win);
@@ -4355,7 +4428,8 @@ int ferrompi_type_create_resized(int32_t old_h, int64_t lb,
 
 int ferrompi_type_free(int32_t type_handle) {
     if (type_handle < 0 || type_handle >= MAX_DATATYPES) return MPI_ERR_ARG;
-    if (!datatype_used[type_handle]) return MPI_SUCCESS;  /* already freed */
+    if (!atomic_load_explicit(&datatype_used[type_handle],
+                              memory_order_acquire)) return MPI_SUCCESS;  /* already freed */
     int ret = MPI_Type_free(&datatype_table[type_handle]);
     free_datatype_slot(type_handle);  /* clears slot regardless of MPI_Type_free outcome */
     return ret;
@@ -4549,9 +4623,9 @@ static int32_t alloc_op_slot(void) {
 
 static void free_op_slot(int32_t slot) {
     if (slot >= 0 && slot < MAX_OPS) {
-        op_table[slot] = MPI_OP_NULL;
         /* Release stores: any thread that later acquires op_used == 0 will also
-         * observe the NULL closure pointers (no dangling pointer visible). */
+         * observe the NULL op and closure pointers (no dangling pointer visible). */
+        atomic_store_explicit(&op_table[slot], MPI_OP_NULL, memory_order_release);
         atomic_store_explicit(&op_closure_data[slot], NULL, memory_order_release);
         atomic_store_explicit(&op_closure_vtbl[slot], NULL, memory_order_release);
         atomic_store_explicit(&op_used[slot], 0, memory_order_release);
@@ -4671,7 +4745,7 @@ int ferrompi_op_create_user(int32_t slot, int32_t commute, int32_t* out_handle) 
     int ret = MPI_Op_create(ferrompi_user_op_trampolines[slot],
                             (int)commute, &op);
     if (ret != MPI_SUCCESS) return ret;
-    op_table[slot] = op;
+    atomic_store_explicit(&op_table[slot], op, memory_order_release);
     *out_handle = slot;
     return MPI_SUCCESS;
 }
@@ -4680,11 +4754,25 @@ int ferrompi_op_create_user(int32_t slot, int32_t commute, int32_t* out_handle) 
  * clear the slot.  Drop ordering: MPI_Op_free first (ADR-0005 Decision 3). */
 int ferrompi_op_free(int32_t handle) {
     if (handle < 0 || handle >= MAX_OPS) return MPI_ERR_ARG;
-    /* Step 1: MPI_Op_free — MPI will not invoke the trampoline after this. */
-    int ret = MPI_Op_free(&op_table[handle]);
+    /* Step 1: MPI_Op_free — MPI will not invoke the trampoline after this.
+     * Stage through a local because MPI_Op_free takes a non-atomic MPI_Op*;
+     * after it returns, tmp == MPI_OP_NULL, which we store back atomically. */
+    MPI_Op tmp = atomic_load_explicit(&op_table[handle], memory_order_acquire);
+    int ret = MPI_Op_free(&tmp);
+    atomic_store_explicit(&op_table[handle], tmp, memory_order_release);
+    /* If MPI_Op_free failed (rare: MPI_ERR_OP on a predefined op, or an
+     * implementation rejecting a free while the op is referenced by an
+     * outstanding non-blocking collective), the op is still live and may
+     * be invoked.  Dropping the Rust closure now would leave the trampoline
+     * with dangling closure-data pointers (UB on next invocation).  Return
+     * the error without releasing closure or slot; the caller must retry
+     * the free after the offending collective completes. */
+    if (ret != MPI_SUCCESS) {
+        return ret;
+    }
     /* Step 2: drop the Rust-boxed closure via the Rust callback. */
     ferrompi_op_drop_closure(handle);
-    /* Step 3: reclaim the slot. */
+    /* Step 3: reclaim the slot (also overwrites op_table[handle] with MPI_OP_NULL). */
     free_op_slot(handle);
     return ret;
 }
@@ -4717,7 +4805,7 @@ int ferrompi_allreduce_user_op(
     MPI_Datatype dt = get_datatype(datatype_tag);
     if (dt == MPI_DATATYPE_NULL) return MPI_ERR_TYPE;
     if (op_handle < 0 || op_handle >= MAX_OPS) return MPI_ERR_ARG;
-    MPI_Op op = op_table[op_handle];
+    MPI_Op op = atomic_load_explicit(&op_table[op_handle], memory_order_acquire);
     if (op == MPI_OP_NULL) return MPI_ERR_OP;
 #if MPI_VERSION >= 4
     if (count > INT_MAX) {
