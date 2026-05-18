@@ -447,7 +447,7 @@ impl<T: MpiDatatype> Drop for UserOp<T> {
    ```
    where `ferrompi_invoke_user_op` is a non-trampoline C function that
    retrieves the fat pointer from `op_closure_table[slot]` and calls
-   `ferrompi_call_rust_closure` — the Rust `extern "C"` function that
+   `rust_user_op_invoke` — the Rust `extern "C"` function that
    runs `catch_unwind` and the actual closure body.
 5. A static array `ferrompi_user_op_trampolines[MAX_OPS]` holding the
    function pointers for all `MAX_OPS` trampolines, exposed to Rust via
@@ -460,9 +460,9 @@ impl<T: MpiDatatype> Drop for UserOp<T> {
 ### Rust-side additions to `src/`
 
 - A new module `src/op.rs` (or `src/op/mod.rs`) containing `UserOp<T>`,
-  the `Drop` implementation, and the `extern "C"` `ferrompi_call_rust_closure`
+  the `Drop` implementation, and the `extern "C"` `rust_user_op_invoke`
   function.
-- The `ferrompi_call_rust_closure` entry point reconstructs the `&[T]` and
+- The `rust_user_op_invoke` entry point reconstructs the `&[T]` and
   `&mut [T]` slices, calls `std::panic::catch_unwind`, and calls
   `std::process::abort()` on `Err`.
 - FFI declarations for `ferrompi_op_create`, `ferrompi_op_free`, and
@@ -476,7 +476,7 @@ impl<T: MpiDatatype> Drop for UserOp<T> {
 | No concurrent mutation in closure state  | `F: Sync` bound at compile time                                   |
 | Closure accessible from any thread       | `F: Send` bound at compile time                                   |
 | No borrow shorter than `MPI_Op` lifetime | `F: 'static` bound at compile time                                |
-| No panic across FFI boundary             | `catch_unwind` + `process::abort` in `ferrompi_call_rust_closure` |
+| No panic across FFI boundary             | `catch_unwind` + `process::abort` in `rust_user_op_invoke` |
 | Correct slice type in trampoline         | `debug_assert_eq!(T::TAG as i32, mapped_tag(*dt))`                |
 
 ---
@@ -543,7 +543,7 @@ or the safety model. They are left for ticket-037.
    trampolines are generated with a single recursive macro, an `include!`-driven
    repetition file, or a `build.rs` code-generation step. All produce equivalent
    object code; the choice is a build-system preference.
-4. **`ferrompi_call_rust_closure` calling convention details.** The exact
+4. **`rust_user_op_invoke` calling convention details.** The exact
    function signature and `extern "C"` attribute placement in Rust are
    implementation choices constrained by the ABI but not by this design.
 

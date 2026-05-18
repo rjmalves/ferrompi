@@ -306,9 +306,15 @@ fn main() -> ferrompi::Result<()> {
 
 Key differences: ferrompi does not use lifetime scopes or guard wrappers for
 nonblocking operations — `Request::wait()` takes ownership and the buffer is safe
-to read afterwards. There is no implicit wait on drop; a `Request` that is dropped
-without calling `wait()` will leak the MPI handle (ferrompi logs a debug warning but
-does not panic).
+to read afterwards. A `Request` dropped without calling `wait()` will **block in Drop**
+until the operation completes — the handle is not leaked, but the
+implicit wait may be surprising in latency-sensitive code, and can
+deadlock if the peer never matches the send/recv. For control flow
+that bypasses `wait()` (e.g., an early-return `?` on an error path,
+or a panic unwind), prefer explicit `wait()` or `test()` to keep
+failure modes observable. A future ferrompi version is expected to
+attempt `MPI_Cancel` from `Drop` to make this safer; until then,
+assume `Drop` blocks.
 
 ### 3c. Persistent Broadcast Loop
 

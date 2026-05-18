@@ -202,7 +202,7 @@ pub trait MpiIndexedDatatype: sealed_indexed::Sealed + Copy + Send + 'static {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct FloatInt {
@@ -216,7 +216,7 @@ pub struct FloatInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 16`, `alignof == 8` (4 bytes of trailing
 /// padding after the `i32` index to satisfy the `f64` alignment of the next
@@ -235,7 +235,7 @@ pub struct DoubleInt {
 /// On 64-bit Linux, C `long` is 8 bytes, so `value` is `i64`.
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 16`, `alignof == 8`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,7 +251,7 @@ pub struct LongInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout: `sizeof == 8`, `alignof == 4`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -267,7 +267,7 @@ pub struct Int2 {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 8`, `alignof == 4` (2 bytes of padding
 /// between `i16` value and `i32` index to satisfy `i32` alignment).
@@ -290,7 +290,7 @@ pub struct ShortInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on x86_64 Linux: `sizeof == 32`, `alignof == 16`.
 /// Layout on aarch64 Linux: `sizeof == 32`, `alignof == 16`

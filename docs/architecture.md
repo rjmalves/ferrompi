@@ -22,7 +22,7 @@ graph TD
     A["Rust application code\n(user crate, examples/)"]
     B["Public ferrompi API\n(src/lib.rs, src/comm/*, src/window.rs,\nsrc/group.rs, src/datatype_builder.rs, src/op.rs)"]
     C["FFI declarations\n(src/ffi.rs — extern \"C\" blocks)"]
-    D["C wrapper layer\n(csrc/ferrompi.c — 4561 LOC\ncsrc/ferrompi.h — 2171 LOC)"]
+    D["C wrapper layer\n(csrc/ferrompi.c — 4629 LOC\ncsrc/ferrompi.h — 2171 LOC)"]
     E["MPI implementation\n(MPICH / Open MPI / Cray MPT)"]
     F["MPI runtime\n(process manager, network fabric, RDMA HW)"]
 
@@ -235,7 +235,7 @@ message, operation }`. The `operation` tag is the C function name with the
   `Mpi::version()` at first call and cache the result. The probe lives in Rust
   because version queries are pure Rust logic; the underlying MPI version
   integer is available without FFI.
-- **`catch_unwind + abort` panic fence** — the `ferrompi_call_rust_closure`
+- **`catch_unwind + abort` panic fence** — the `rust_user_op_invoke`
   `extern "C"` entry point in `src/op.rs` wraps every closure invocation in
   `std::panic::catch_unwind`. If the closure panics, the process aborts
   immediately. Panicking across the FFI boundary is undefined behaviour; silent

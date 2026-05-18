@@ -9,7 +9,7 @@
 ## Context
 
 The most common question from new contributors is: _why does ferrompi
-maintain a hand-written C layer at `csrc/ferrompi.c` (4561 LOC) and
+maintain a hand-written C layer at `csrc/ferrompi.c` (4629 LOC) and
 `csrc/ferrompi.h` (2171 LOC) instead of generating Rust bindings directly
 from MPI headers via `bindgen`?_ Most existing Rust MPI bindings — notably
 `rsmpi` — take exactly that approach: run `bindgen` over the system MPI
@@ -198,7 +198,7 @@ the FFI declarations.
 
 **Cons:**
 
-- _Code volume._ The C layer is 4561 LOC in `csrc/ferrompi.c` and 2171 LOC
+- _Code volume._ The C layer is 4629 LOC in `csrc/ferrompi.c` and 2171 LOC
   in `csrc/ferrompi.h`. Every new MPI function requires additions to both
   files, to `src/ffi.rs`, and to the safe Rust wrapper, following the
   six-layer convention documented in `epic-07-summary.md`.
