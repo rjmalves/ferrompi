@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`buffer_attach` now rejects oversized buffers.** `Mpi::buffer_attach`
+  returns `Err(Error::InvalidBuffer)` when the buffer exceeds `i32::MAX`
+  bytes, instead of silently truncating the size passed to
+  `MPI_Buffer_attach`.
+- **V-collective length validation.** `gatherv`, `scatterv`,
+  `allgatherv`, `alltoallv`, and their nonblocking variants now return
+  `Err(Error::InvalidBuffer)` when `counts.len() != displs.len()`. The
+  persistent `*_init` variants already had this guard; the new guards
+  bring blocking and nonblocking into parity.
+- **Persistent collectives reject oversized counts.** All persistent
+  `*_init` shims now return `MPI_ERR_COUNT` when `count > INT_MAX`
+  instead of silently truncating the cast to `int`. Full `_c` dispatch
+  for persistent operations is deferred.
+- **5 new direct-FFI integration tests** for boundary conditions:
+  `test_comm_table_concurrency` (4-thread duplicate stress under
+  `MPI_THREAD_MULTIPLE`), `test_persistent_count_overflow`,
+  `test_waitall_count_overflow`, `test_get_group_invalid_handle`,
+  `test_create_from_group_null_handle`. Also new tests in
+  `test_user_op.rs` (non-commutative reduction) and `test_waitany.rs`
+  (`test_any` / `test_some` polling loops).
+- **Send/Sync status table** in the crate-level rustdoc enumerating
+  every public type's auto-trait status and rationale (see lib.rs
+  "Send/Sync Status of Public Types").
+- **37 new SAFETY comments** across `src/comm/{blocking,persistent,
+v_collective}.rs` documenting pointer validity, type-tag mapping,
+  and handle ownership at each `unsafe` FFI block.
+
+### Changed
+
+- **`Error::from_code(0)` no longer panics.** Previously
+  `assert!(code != 0, ...)`; now returns
+  `Error::Internal("from_code called with success code 0")`. Library
+  code must not panic — `check_with_op` remains the canonical
+  success-vs-error idiom.
+- **`Communicator::allreduce_indexed` error tag corrected.** Errors
+  now carry `operation: Some("allreduce_indexed")` instead of the
+  generic `"allreduce"`. Defensive audit also corrected
+  `allreduce_bytes` (was `"allreduce"`, now `"allreduce_bytes"`).
+- **`supports_create_from_group` no longer caches transient
+  failures.** If `Mpi::version()` fails (e.g., called pre-init), the
+  result is not cached; a subsequent call can re-probe.
+- **`src/error.rs` migrated to `thiserror v2`.** Both `MpiErrorClass`
+  and `Error` now derive `thiserror::Error`. All existing `Display`
+  strings preserved byte-for-byte (cobre parsers are safe).
+- **Request::Drop documented as blocking.** Added loud `# Drop
+Behavior` rustdoc sections to `Request` and `PersistentRequest`
+  explaining the `MPI_Wait`-in-Drop semantics and deadlock risk.
+  ADR-0004 gained a Drop-behavior subsection. Cancel-then-wait is
+  deferred to v0.5.
+
+### Fixed
+
+- **`comm_table` is now thread-safe under `MPI_THREAD_MULTIPLE`.** The
+  communicator handle table joined the other 6 handle tables in
+  using C11 atomic-CAS slot allocation. Two threads calling
+  `world.duplicate()` or `world.split()` concurrently no longer race
+  on slot indices.
+- **`op_table` reads are now atomic.** The user-defined op table
+  joined the others; `op_table[handle]` is `_Atomic(MPI_Op)` and
+  accessed via `atomic_store/load_explicit` everywhere.
+- **`tables_initialized` is now atomic.** The init guard uses a
+  CAS so concurrent first-time initialization is safe (the previous
+  plain-int flag was UB-prone under `MPI_THREAD_MULTIPLE`).
+- **3 non-atomic acquire-loads in `info_free`/`group_free`/
+  `type_free` upgraded to `memory_order_acquire`** for parity with
+  the get-side acquire loads.
+- **`ferrompi_op_free` preserves the live op on `MPI_Op_free` error**
+  instead of unconditionally dropping the Rust closure. If MPI
+  rejects the free, the slot remains valid so the trampoline cannot
+  invoke a null closure pointer.
+- **Window error handlers' return code is now propagated.** All 3
+  Win creators (`win_allocate_shared`, `win_create`, `win_allocate`)
+  now check `MPI_Win_set_errhandler`'s return code; failures free
+  the partial window and surface as `Err`.
+- **Overflow guards moved above `malloc` in `waitall`/`startall`.**
+  The `count > INT_MAX` check now runs before the allocation
+  attempt, preventing wasted allocations on overflow paths.
+- **`get_group` sentinel mismatch fixed.** Invalid group handles
+  now return `MPI_GROUP_NULL` (was incorrectly returning
+  `MPI_GROUP_EMPTY`); 7+ callers' `MPI_GROUP_NULL` guards now fire
+  correctly. Slot 0 still returns `MPI_GROUP_EMPTY` as intended.
+- **MPI-4 `comm_create_from_group` NULL guard added.** Returns
+  `MPI_ERR_OTHER` if the call yields `MPI_COMM_NULL` instead of
+  allowing a NULL communicator into the handle table.
+- **`reduce_inplace` non-root passes `buf` as `recvbuf`** instead
+  of `NULL`, satisfying strict MPI implementations that reject NULL
+  for the not-significant-but-must-be-valid `recvbuf` argument.
+- **`lib.rs` Capabilities list and Send/Sync table** brought into
+  alignment with the actual public API (Groups, CustomDatatype,
+  UserOp, distributed Win RMA, Info, persistent P2P).
+- **6 doc-precision fixes**: ADR-0005 function rename
+  (`ferrompi_call_rust_closure` → `rust_user_op_invoke`), 6
+  malformed rustdoc link suffixes in `src/datatype.rs`, 3 stale
+  "4561 LOC" citations updated to 4629, migration guide
+  `Request::Drop` paragraph corrected, ADR-0004 Drop-behavior
+  subsection added.
+
 ## [0.4.0] - 2026-04-24
 
 ### Breaking Changes

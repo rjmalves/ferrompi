@@ -130,8 +130,8 @@
 //! | [`UserOp<T>`] | `Send + Sync` (for `T: MpiDatatype`) | Auto-derived: fields are `i32` + `PhantomData<T>`. The trait bound `MpiDatatype: Copy + Send + 'static` and the fact that all concrete `MpiDatatype` impls are also `Sync` give `Send + Sync` for `UserOp<T>`. The global closure registry uses internal `unsafe impl Send/Sync` on its slots; that is a separate object from `UserOp<T>` itself. |
 //! | [`Win<T>`](crate::Win) (feature `rma`) | `!Send + !Sync` | `NonNull<T>` field suppresses auto-traits; RMA window's local memory pointer is not safe to share across threads. |
 //! | [`SharedWindow<T>`](crate::SharedWindow) (feature `rma`) | `!Send + !Sync` | `NonNull<T>` field; same rationale as `Win<T>`. |
-//! | [`LockGuard<'a, T>`](crate::LockGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
-//! | [`LockAllGuard<'a, T>`](crate::LockAllGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
+//! | [`LockGuard<'a, T>`] (feature `rma`) | `!Send + !Sync` | Borrows `SharedWindow<T>`; inherits non-Send/Sync. |
+//! | [`LockAllGuard<'a, T>`] (feature `rma`) | `!Send + !Sync` | Borrows `SharedWindow<T>`; inherits non-Send/Sync. |
 //! | [`WinLockGuard<'g, 'a, T>`](crate::WinLockGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
 //! | [`WinLockAllGuard<'g, 'a, T>`](crate::WinLockAllGuard) (feature `rma`) | `!Send + !Sync` | Borrows `Win<T>`; inherits non-Send/Sync. |
 //!

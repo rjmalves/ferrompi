@@ -197,14 +197,28 @@ static MPI_Comm get_comm(int32_t handle) {
 // Slot 0 is permanently MPI_COMM_WORLD; we skip it explicitly so the CAS can
 // never claim it.  The hint is advisory: an inaccurate hint only lengthens the
 // scan, never produces an incorrect result.  acq_rel on the CAS prevents
-// reordering of the slot-claim with later operations on the same thread, but
-// the subsequent comm_table[idx] write is NOT covered by the CAS's release
-// fence (it is sequenced after, not before).  The handle returned by this
-// function is then used same-thread (caller writes it, then later reads it
-// via get_comm); cross-thread handle transfers must establish their own
-// happens-before via the transfer mechanism (channel, Arc, Mutex, etc.).
-// Within this same-thread/transfer-aware contract the implementation is
-// correct on x86, ARM64, and POWER.
+// reordering of the slot-claim with later operations on the same thread.
+//
+// The subsequent comm_table[idx] write is sequenced AFTER the CAS's release,
+// not before — so a thread reading comm_table[idx] after acquire-loading
+// comm_used[idx] only synchronizes-with the CAS store of `1`, not the table
+// payload write.  Under this implementation, callers must ensure
+// happens-before is established between the allocation site and any
+// cross-thread read of the handle, via an external synchronization
+// mechanism (Mutex unlock/lock, channel send/recv, Arc clone+drop, etc.).
+// MPI itself requires the user to coordinate communicator usage between
+// threads under MPI_THREAD_MULTIPLE, so this is a strictly weaker
+// constraint than the MPI standard already imposes.
+//
+// On TSO architectures (x86, x86_64), every plain store has implicit
+// release semantics, so the gap is invisible.  On weakly-ordered
+// architectures (ARM64, POWER), the gap is observable in principle but
+// is closed by the external synchronization that MPI usage already
+// requires.  A fully-paired pattern (write table first, then release-
+// store comm_used) is used in ferrompi_comm_free for the deallocation
+// side; allocation could be migrated to that pattern in a future
+// revision to remove the contract-via-MPI-usage dependency.  See the
+// `free` paths in this file for the canonical paired pattern.
 static int32_t alloc_comm(MPI_Comm comm) {
     int hint = atomic_load_explicit(&next_comm_hint, memory_order_relaxed);
     for (int i = 0; i < MAX_COMMS; i++) {
