@@ -93,6 +93,11 @@ Behavior` rustdoc sections to `Request` and `PersistentRequest`
   Persistent collectives are stubbed (return `MPI_ERR_OTHER`) on
   pre-MPI-4 runtimes like OpenMPI 4.1.x (which reports
   `MPI_VERSION = 3`), so the count guard is never reached.
+- **`test_rma_win_create` now gracefully skips when `MPI_Win_create`
+  is unsupported.** OpenMPI 4.x with `--btl=self,tcp` (the CI fallback
+  when UCX/rdma is unavailable) returns `MPI_ERR_WIN` from
+  `MPI_Win_create` over caller-owned memory. `Win::allocate` (which
+  uses MPI-managed memory) still tests cleanly.
 - **`comm_table` is now thread-safe under `MPI_THREAD_MULTIPLE`.** The
   communicator handle table joined the other 6 handle tables in
   using C11 atomic-CAS slot allocation. Two threads calling
