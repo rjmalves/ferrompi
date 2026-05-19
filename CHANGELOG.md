@@ -75,6 +75,24 @@ Behavior` rustdoc sections to `Request` and `PersistentRequest`
   valid until `resolve()` is called. Closes architecture-review SG-1
   for these two methods (the broader RMA buffer-lifetime story for
   put/get/accumulate remains a v0.5 design item).
+- **`install_errors_return_win` is now best-effort.** Per MPI-3 §9.4.4,
+  newly-created windows default to `MPI_ERRORS_ARE_FATAL`. The C shim
+  attempts to upgrade to `MPI_ERRORS_RETURN`, but OpenMPI 4.x has been
+  observed to reject `MPI_Win_set_errhandler` with `MPI_ERR_WIN` on
+  freshly-created windows in some configurations (e.g., `--btl=self,tcp`
+  in CI). The shim now logs the failure to `stderr` and keeps the
+  window with its MPI default error handler, instead of failing
+  `Win::create`/`Win::allocate` outright.
+- **Persistent P2P integration tests now add a post-init barrier**
+  before issuing `start()`. Without this barrier, OpenMPI 4.x can
+  deadlock under `--btl=self,tcp` when rank 0's `start()` issues before
+  rank 1's `recv_init` has completed. `test_persistent_p2p`,
+  `test_persistent_ssend`, and `test_persistent_bsend` were updated;
+  the existing `test_persistent_rsend` already had this barrier.
+- **`test_persistent_count_overflow` now skips on MPI < 4.0.**
+  Persistent collectives are stubbed (return `MPI_ERR_OTHER`) on
+  pre-MPI-4 runtimes like OpenMPI 4.1.x (which reports
+  `MPI_VERSION = 3`), so the count guard is never reached.
 - **`comm_table` is now thread-safe under `MPI_THREAD_MULTIPLE`.** The
   communicator handle table joined the other 6 handle tables in
   using C11 atomic-CAS slot allocation. Two threads calling

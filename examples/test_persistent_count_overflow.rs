@@ -9,6 +9,21 @@
 
 use ferrompi::{Error, Mpi, MpiErrorClass};
 
+/// Returns the major version of the linked MPI runtime by parsing
+/// `MPI_Get_version` output via `Mpi::version()`.  Returns 0 on parse
+/// failure so callers can SKIP gracefully.
+fn mpi_major_version() -> u32 {
+    Mpi::version()
+        .ok()
+        .and_then(|v| {
+            v.split_whitespace()
+                .nth(1)
+                .and_then(|tok| tok.split('.').next())
+                .and_then(|s| s.parse().ok())
+        })
+        .unwrap_or(0)
+}
+
 // Raw FFI declaration for the C-side shim under test.
 //
 // We declare it here rather than using ferrompi::ffi (which is pub(crate)) so
@@ -48,6 +63,22 @@ fn main() {
         size == 2,
         "test_persistent_count_overflow requires exactly 2 processes, got {size}"
     );
+
+    // Persistent collectives are MPI 4.0+.  On older runtimes (e.g.,
+    // OpenMPI 4.x reports MPI_VERSION = 3) the C-side shim is a stub
+    // that always returns MPI_ERR_OTHER, so the count guard is never
+    // reached.  Skip gracefully — the count guard is still in place
+    // for MPI >= 4 runtimes (covered by MPICH 4.2.x in the CI matrix).
+    if mpi_major_version() < 4 {
+        if rank == 0 {
+            println!(
+                "SKIP: test_persistent_count_overflow requires MPI 4.0+ (got MPI {}.x); \
+                 persistent collectives are stubbed on older runtimes",
+                mpi_major_version()
+            );
+        }
+        return;
+    }
 
     // ========================================================================
     // Test: ferrompi_allreduce_init with count > INT_MAX returns MPI_ERR_COUNT

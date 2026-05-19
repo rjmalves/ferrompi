@@ -38,6 +38,11 @@ fn main() {
             .bsend_init(&send, 1, TAG)
             .expect("bsend_init failed on rank 0");
 
+        // Synchronize both ranks past the init phase before any start().
+        // Required for OpenMPI 4.x compatibility — without this, rank 0's
+        // first start() may issue before rank 1 has finished recv_init.
+        world.barrier().expect("post-init barrier failed on rank 0");
+
         for iter in 0..ITERS {
             let value = (iter + 1) as f64;
             send.fill(value);
@@ -51,6 +56,9 @@ fn main() {
         let mut recv_req = world
             .recv_init(&mut recv, 0, TAG)
             .expect("recv_init failed on rank 1");
+
+        // See companion comment on rank 0.
+        world.barrier().expect("post-init barrier failed on rank 1");
 
         for iter in 0..ITERS {
             let expected = (iter + 1) as f64;

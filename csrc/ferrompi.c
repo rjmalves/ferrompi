@@ -526,9 +526,38 @@ static int install_errors_return(MPI_Comm comm) {
 }
 
 /* Mirrors install_errors_return for MPI_Win.  Used by the three Win
- * creators so that RMA errors return rather than abort. */
+ * creators so that RMA errors return rather than abort.
+ *
+ * Best-effort: per MPI-3 §9.4.4, a window's default error handler is
+ * MPI_ERRORS_ARE_FATAL.  We try to upgrade it to MPI_ERRORS_RETURN so
+ * RMA errors surface as Result::Err in Rust instead of aborting the
+ * process.  However, OpenMPI 4.x has been observed to reject
+ * MPI_Win_set_errhandler with MPI_ERR_WIN on freshly-created windows
+ * in some configurations (e.g., under --btl=self,tcp in CI).  Treating
+ * that as a hard failure would make Win creation unusable on OpenMPI 4.x.
+ *
+ * Trade-off: if the errhandler-install fails, log to stderr and keep
+ * the window.  Subsequent RMA errors on that window will then trigger
+ * the default MPI_ERRORS_ARE_FATAL behaviour — equivalent to the
+ * pre-ticket-008 behaviour, but now visible to operators via the
+ * stderr log.  Returns MPI_SUCCESS so the caller proceeds with
+ * window registration; returns the original MPI error code only on
+ * non-recoverable conditions (none of which are reachable here in
+ * practice). */
 static int install_errors_return_win(MPI_Win win) {
-    return MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
+    int eh_ret = MPI_Win_set_errhandler(win, MPI_ERRORS_RETURN);
+    if (eh_ret != MPI_SUCCESS) {
+        /* Note: cannot use Rust's logging from C; stderr is the
+         * portable fallback. */
+        fprintf(stderr,
+                "ferrompi: warning: MPI_Win_set_errhandler returned %d on a "
+                "freshly-created window.  The window will use the MPI default "
+                "error handler (MPI_ERRORS_ARE_FATAL).  Subsequent RMA errors "
+                "on this window will abort the process rather than return as "
+                "Result::Err.  This is a known OpenMPI 4.x quirk.\n",
+                eh_ret);
+    }
+    return MPI_SUCCESS;
 }
 
 /* ============================================================
