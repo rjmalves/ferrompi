@@ -1,0 +1,184 @@
+//! Integration test for `Win::compare_and_swap` — atomic compare-and-swap
+//! over a fence epoch.
+//!
+//! Verifies two test cases:
+//!   1. Match: rank 1's window slot 0 starts at `100i32`; rank 0 calls
+//!      `compare_and_swap(200, 100, 1, 0)`; after the closing fence:
+//!      rank 0's returned value equals `100` (pre-CAS, swap succeeded)
+//!      and rank 1's window slot 0 equals `200` (updated).
+//!   2. No match: rank 1's window slot 0 starts at `100i32`; rank 0 calls
+//!      `compare_and_swap(200, 99, 1, 0)`; after the closing fence:
+//!      rank 0's returned value equals `100` (pre-CAS, swap did not occur)
+//!      and rank 1's window slot 0 equals `100` (unchanged).
+//!
+//! Run with: mpiexec -n 2 ./target/debug/examples/test_rma_compare_and_swap
+
+use ferrompi::{Mpi, PendingFetchResult, ReduceOp, Win, WinFenceAssert};
+
+fn main() {
+    let mpi = Mpi::init().expect("MPI init failed");
+    let world = mpi.world();
+    let rank = world.rank();
+    let size = world.size();
+
+    assert!(
+        size >= 2,
+        "test_rma_compare_and_swap requires at least 2 processes, got {size}"
+    );
+
+    // ========================================================================
+    // Probe: Win::compare_and_swap requires MPI >= 3. Skip gracefully on older
+    // builds.
+    // ========================================================================
+    let version_str = Mpi::version().unwrap_or_default();
+    let major: u32 = version_str
+        .split_whitespace()
+        .nth(1)
+        .and_then(|v| v.split('.').next())
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(0);
+
+    if major < 3 {
+        if rank == 0 {
+            println!("SKIP: Win::compare_and_swap requires MPI >= 3 (got {version_str})");
+        }
+        return;
+    }
+
+    let mut local_ok = true;
+
+    // ========================================================================
+    // Test 1 (match): rank 1 initialises its window slot 0 to 100i32.
+    // Rank 0 calls compare_and_swap(200, 100, 1, 0). After the closing fence:
+    //   - rank 0's returned value must equal 100 (pre-CAS value)
+    //   - rank 1's window slot 0 must equal 200 (swap succeeded)
+    // ========================================================================
+    {
+        let mut win = Win::<i32>::allocate(&world, 1).expect("Win::allocate failed (test 1)");
+
+        if rank == 1 {
+            win.local_slice_mut()[0] = 100;
+        }
+
+        win.fence(WinFenceAssert::default())
+            .expect("test 1 opening fence failed");
+
+        // compare_and_swap returns a PendingFetchResult — result is not yet
+        // populated; must call .resolve() only after the epoch closes.
+        let mut pending: Option<PendingFetchResult<i32>> = None;
+        if rank == 0 {
+            match win.compare_and_swap(200, 100, 1, 0) {
+                Ok(p) => pending = Some(p),
+                Err(e) => {
+                    eprintln!("FAIL: rank 0 Win::compare_and_swap (match) returned error: {e}");
+                    local_ok = false;
+                }
+            }
+        }
+
+        // Close the epoch — MPI_Compare_and_swap completes here.
+        win.fence(WinFenceAssert::default())
+            .expect("test 1 closing fence failed");
+
+        // SAFETY: epoch is closed; the result buffer is now populated.
+        let mut old = 0i32;
+        if let Some(p) = pending {
+            old = unsafe { p.resolve() };
+        }
+
+        if rank == 0 && old != 100 {
+            eprintln!("FAIL: rank 0 returned value (match): expected 100, got {old}");
+            local_ok = false;
+        }
+
+        if rank == 1 {
+            let got = win.local_slice()[0];
+            if got != 200 {
+                eprintln!("FAIL: rank 1 window slot 0 after match CAS: expected 200, got {got}");
+                local_ok = false;
+            }
+        }
+    }
+
+    world.barrier().expect("barrier after test 1 failed");
+    if rank == 0 && local_ok {
+        println!("PASS: Win::compare_and_swap (match)");
+    }
+
+    // ========================================================================
+    // Test 2 (no match): rank 1 initialises its window slot 0 to 100i32.
+    // Rank 0 calls compare_and_swap(200, 99, 1, 0). After the closing fence:
+    //   - rank 0's returned value must equal 100 (pre-CAS value)
+    //   - rank 1's window slot 0 must equal 100 (unchanged, swap did not occur)
+    // ========================================================================
+    {
+        let mut win = Win::<i32>::allocate(&world, 1).expect("Win::allocate failed (test 2)");
+
+        if rank == 1 {
+            win.local_slice_mut()[0] = 100;
+        }
+
+        win.fence(WinFenceAssert::default())
+            .expect("test 2 opening fence failed");
+
+        // compare_and_swap returns a PendingFetchResult — result is not yet
+        // populated; must call .resolve() only after the epoch closes.
+        let mut pending: Option<PendingFetchResult<i32>> = None;
+        if rank == 0 {
+            match win.compare_and_swap(200, 99, 1, 0) {
+                Ok(p) => pending = Some(p),
+                Err(e) => {
+                    eprintln!("FAIL: rank 0 Win::compare_and_swap (no match) returned error: {e}");
+                    local_ok = false;
+                }
+            }
+        }
+
+        // Close the epoch — MPI_Compare_and_swap completes here.
+        win.fence(WinFenceAssert::default())
+            .expect("test 2 closing fence failed");
+
+        // SAFETY: epoch is closed; the result buffer is now populated.
+        let mut old = 0i32;
+        if let Some(p) = pending {
+            old = unsafe { p.resolve() };
+        }
+
+        if rank == 0 && old != 100 {
+            eprintln!("FAIL: rank 0 returned value (no match): expected 100, got {old}");
+            local_ok = false;
+        }
+
+        if rank == 1 {
+            let got = win.local_slice()[0];
+            if got != 100 {
+                eprintln!("FAIL: rank 1 window slot 0 after no-match CAS: expected 100, got {got}");
+                local_ok = false;
+            }
+        }
+    }
+
+    world.barrier().expect("barrier after test 2 failed");
+    if rank == 0 && local_ok {
+        println!("PASS: Win::compare_and_swap (no match)");
+    }
+
+    // ========================================================================
+    // Sentinel allreduce(Min) — confirms no rank diverged silently
+    // ========================================================================
+    let global_ok = world
+        .allreduce_scalar(local_ok as i32, ReduceOp::Min)
+        .expect("sentinel allreduce failed");
+
+    assert!(
+        global_ok != 0,
+        "test_rma_compare_and_swap: one or more ranks reported failure"
+    );
+
+    world.barrier().expect("final barrier failed");
+    if rank == 0 {
+        println!("\n========================================");
+        println!("All Win::compare_and_swap tests passed! (2 tests)");
+        println!("========================================");
+    }
+}

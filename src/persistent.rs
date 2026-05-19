@@ -113,10 +113,13 @@ impl PersistentRequest {
             // Not started, nothing to wait for
             return Ok(());
         }
-        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
-        Error::check_with_op(ret, "wait")?;
+        // Mark inactive BEFORE the FFI call so that Drop does not attempt a
+        // second MPI_Wait on error.  A request handed to MPI_Wait is consumed
+        // by MPI regardless of whether MPI reports an error; re-waiting on it
+        // would be a use-after-free of the request handle.
         self.active = false;
-        Ok(())
+        let ret = unsafe { ffi::ferrompi_wait(self.handle) };
+        Error::check_with_op(ret, "wait")
     }
 
     /// Test if the operation has completed without blocking.
@@ -171,25 +174,43 @@ impl PersistentRequest {
         }
 
         let mut handles: Vec<i64> = requests.iter().map(|r| r.handle).collect();
-        let ret = unsafe { ffi::ferrompi_waitall(handles.len() as i64, handles.as_mut_ptr()) };
-        Error::check_with_op(ret, "waitall")?;
-
-        // Only mark as inactive after successful wait
+        // Mark all inactive BEFORE the FFI call: MPI_Waitall consumes every
+        // request handle regardless of whether it reports an error, so Drop
+        // must not attempt a second MPI_Wait on any of them.
         for req in requests.iter_mut() {
             req.active = false;
         }
-
-        Ok(())
+        let ret = unsafe { ffi::ferrompi_waitall(handles.len() as i64, handles.as_mut_ptr()) };
+        Error::check_with_op(ret, "waitall")
     }
 }
 
 impl Drop for PersistentRequest {
+    /// Complete any in-flight operation, then free the persistent request handle.
+    ///
+    /// When `self.active` is `true` (i.e., `start()` was called but `wait()` has
+    /// not yet returned), this calls `MPI_Wait` before freeing the handle.
+    /// **`MPI_Wait` blocks** until the peer operation completes; if the peer is
+    /// unreachable, this deadlocks. This two-step sequence upholds the MPI
+    /// standard requirement that `MPI_Request_free` must not be called on an
+    /// active request.
+    ///
+    /// See ADR-0004 §"Drop behavior: wait before free" for the full rationale.
     fn drop(&mut self) {
         // If active, wait for completion first
         if self.active {
+            // SAFETY: self.handle is a valid MPI request handle registered in the
+            // C-side request table by the *_init constructor. self.active is true,
+            // so start() was called and MPI holds an in-flight operation on this
+            // handle. ferrompi_wait calls MPI_Wait which completes the operation
+            // and releases the handle's active state before request_free below.
             unsafe { ffi::ferrompi_wait(self.handle) };
         }
         // Free the persistent request
+        // SAFETY: self.handle is a valid persistent MPI request handle. If it was
+        // active, ferrompi_wait above has already completed the operation, so
+        // MPI_Request_free is safe to call. If it was inactive, no operation is
+        // in flight and MPI_Request_free is unconditionally safe on the handle.
         unsafe { ffi::ferrompi_request_free(self.handle) };
     }
 }

@@ -57,6 +57,13 @@ mod sealed_byte {
     pub trait Sealed {}
 }
 
+/// Internal module to seal [`AtomicMpiDatatype`] — a separate seal for types
+/// eligible for `MPI_Compare_and_swap` (integer and byte types only).
+mod sealed_atomic {
+    #[allow(dead_code)]
+    pub trait Sealed {}
+}
+
 /// Tag values matching C-side `FERROMPI_*` defines.
 ///
 /// These discriminants must stay in sync with the `#define FERROMPI_*` values
@@ -195,7 +202,7 @@ pub trait MpiIndexedDatatype: sealed_indexed::Sealed + Copy + Send + 'static {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct FloatInt {
@@ -209,7 +216,7 @@ pub struct FloatInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 16`, `alignof == 8` (4 bytes of trailing
 /// padding after the `i32` index to satisfy the `f64` alignment of the next
@@ -228,7 +235,7 @@ pub struct DoubleInt {
 /// On 64-bit Linux, C `long` is 8 bytes, so `value` is `i64`.
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 16`, `alignof == 8`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -244,7 +251,7 @@ pub struct LongInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout: `sizeof == 8`, `alignof == 4`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -260,7 +267,7 @@ pub struct Int2 {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on 64-bit Linux: `sizeof == 8`, `alignof == 4` (2 bytes of padding
 /// between `i16` value and `i32` index to satisfy `i32` alignment).
@@ -283,7 +290,7 @@ pub struct ShortInt {
 ///
 /// The `index` field conventionally holds the rank of the contributing process.
 /// Use with [`ReduceOp::MaxLoc`](crate::ReduceOp::MaxLoc) or [`ReduceOp::MinLoc`](crate::ReduceOp::MinLoc) via
-/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed)(crate::Communicator::allreduce_indexed).
+/// [`Communicator::allreduce_indexed`](crate::Communicator::allreduce_indexed).
 ///
 /// Layout on x86_64 Linux: `sizeof == 32`, `alignof == 16`.
 /// Layout on aarch64 Linux: `sizeof == 32`, `alignof == 16`
@@ -364,6 +371,55 @@ impl_byte_permutable!(i64);
 
 impl<T: BytePermutable, const N: usize> sealed_byte::Sealed for [T; N] {}
 impl<T: BytePermutable, const N: usize> BytePermutable for [T; N] {}
+
+// ============================================================
+// Atomic-eligible types for MPI_Compare_and_swap
+// ============================================================
+
+/// Trait for types eligible for use with `MPI_Compare_and_swap`.
+///
+/// This is a **sealed trait** — it cannot be implemented outside this crate.
+/// Per MPI 4.1 section 12.5.4, the predefined types guaranteed to support
+/// `MPI_Compare_and_swap` are the integer and byte types: `i32`, `i64`,
+/// `u32`, `u64`, and `u8`.
+///
+/// **Floating-point types (`f32`, `f64`) are intentionally excluded.** The
+/// MPI standard does not require implementations to support floating-point
+/// CAS. Accepting them would introduce silent portability bugs across MPI
+/// implementations.
+///
+/// This trait is used as a bound on [`Win::compare_and_swap`](crate::Win::compare_and_swap)
+/// to ensure the method only exists for windows whose element type is
+/// CAS-eligible.
+///
+/// # Sealed: cannot implement for external types
+///
+/// ```compile_fail
+/// fn _check(w: &ferrompi::Win<f64>) -> ferrompi::Result<f64> {
+///     w.compare_and_swap(0.0, 0.0, 0, 0)
+/// }
+/// ```
+#[cfg(feature = "rma")]
+pub trait AtomicMpiDatatype: sealed_atomic::Sealed + Copy + Send + 'static {}
+
+#[cfg(feature = "rma")]
+macro_rules! impl_atomic_mpi_datatype {
+    ($ty:ty) => {
+        impl sealed_atomic::Sealed for $ty {}
+        impl AtomicMpiDatatype for $ty {}
+    };
+}
+
+#[cfg(feature = "rma")]
+impl_atomic_mpi_datatype!(i32);
+#[cfg(feature = "rma")]
+impl_atomic_mpi_datatype!(i64);
+#[cfg(feature = "rma")]
+impl_atomic_mpi_datatype!(u32);
+#[cfg(feature = "rma")]
+impl_atomic_mpi_datatype!(u64);
+#[cfg(feature = "rma")]
+impl_atomic_mpi_datatype!(u8);
 
 #[cfg(test)]
 mod tests {
@@ -612,5 +668,16 @@ mod tests {
         fn assert_indexed<T: MpiIndexedDatatype>() {}
         assert_indexed::<DoubleInt>();
         assert_indexed::<Int2>();
+    }
+
+    #[cfg(feature = "rma")]
+    #[test]
+    fn atomic_mpi_datatype_implemented_for_integer_types() {
+        fn assert_atomic<T: AtomicMpiDatatype>() {}
+        assert_atomic::<i32>();
+        assert_atomic::<i64>();
+        assert_atomic::<u32>();
+        assert_atomic::<u64>();
+        assert_atomic::<u8>();
     }
 }

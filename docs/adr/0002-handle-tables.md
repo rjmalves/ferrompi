@@ -369,13 +369,18 @@ document this in a code comment adjacent to the atomic declarations and register
 the multi-threaded isend scenario as a mandatory manual pre-release step in
 `CONTRIBUTING.md` or a dedicated `docs/testing.md` entry.
 
-### Out of Scope
+### Out of Scope (at time of ticket-023)
 
-The `comm_table`, `win_table`, and `info_table` have the same structural race
-under `MPI_THREAD_MULTIPLE`. They are excluded from this ADR and from ticket-023
-per the master plan's Confirmed Decision 3. A follow-up ADR will address them in
-a later epic if operational evidence or a TSan run identifies them as practical
-risks.
+The `comm_table`, `win_table`, and `info_table` had the same structural race
+under `MPI_THREAD_MULTIPLE`. They were excluded from this ADR and from ticket-023
+per the master plan's Confirmed Decision 3.
+
+**Update (ticket-006, v0.4.1-hardening epic-02):** All seven handle tables —
+`comm_table`, `request_table`, `win_table`, `info_table`, `group_table`,
+`datatype_table`, and `op_table` — now use the C11 atomic-CAS pattern described
+in this ADR. Slot 0 of `comm_table` is permanently reserved for `MPI_COMM_WORLD`
+and is marked used via `atomic_store_explicit(&comm_used[0], 1, ...)` in both
+`ferrompi_init` and `ferrompi_init_thread`; `alloc_comm` skips slot 0 explicitly.
 
 ## Status
 

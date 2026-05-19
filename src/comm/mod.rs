@@ -72,15 +72,10 @@ pub struct Communicator {
 // Users must ensure they requested sufficient thread support and serialize
 // access themselves when using ThreadLevel::Serialized.
 //
-// NOTE: The C-layer handle tables (comm_table, request_table, etc.) are not
-// internally synchronized. At ThreadLevel::Single and Funneled, only the main
-// thread calls MPI so no data race occurs. At Serialized, the user is required
-// to serialize all MPI calls. At Multiple, concurrent MPI calls are safe per
-// the MPI standard, but our handle table allocation/deallocation is not
-// protected by mutexes. This is acceptable because MPI_THREAD_MULTIPLE only
-// guarantees that MPI calls are thread-safe — the handle tables are modified
-// only inside MPI entry/exit points which the user serializes or the MPI
-// implementation serializes internally.
+// All seven C-layer handle tables (comm_table, request_table, win_table,
+// info_table, group_table, datatype_table, op_table) use the C11 atomic-CAS
+// pattern, eliminating data races under MPI_THREAD_MULTIPLE.
+// See docs/adr/0002-handle-tables.md for the full rationale and design.
 unsafe impl Send for Communicator {}
 unsafe impl Sync for Communicator {}
 

@@ -200,6 +200,28 @@ run_test test_alltoall_init_inplace 4
 run_test test_allreduce_bytes 4
 run_test test_error_context 2
 run_test test_request_table_concurrency 2
+run_test test_comm_table_concurrency 1
+run_test test_group_basic 4
+run_test test_group_set_ops 4
+run_test test_group_ranges 4
+run_test test_comm_from_group 4
+run_test test_group_compare 4
+run_test test_group_translate 4
+run_test test_custom_dt_contiguous 2
+run_test test_custom_dt_vector 2
+run_test test_custom_dt_struct 2
+run_test test_custom_dt_resized 2
+run_test test_custom_dt_p2p 2
+run_test test_mpi_from_group 4
+run_test test_user_op 4
+run_test test_persistent_p2p 2
+run_test test_persistent_rsend 2
+run_test test_persistent_ssend 2
+run_test test_persistent_bsend 2
+run_test test_persistent_count_overflow 2
+run_test test_waitall_count_overflow 2
+run_test test_get_group_invalid_handle 2
+run_test test_create_from_group_null_handle 2
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────${RESET}"
@@ -231,6 +253,20 @@ if [[ "$FEATURES" == *"rma"* ]] || [[ "$FEATURES" == *"numa"* ]]; then
     echo -e "${BOLD}Running RMA/shared memory tests${RESET}"
     echo -e "${BOLD}────────────────────────────────────────${RESET}"
     run_test test_rma_window
+    run_test test_rma_win_create 2
+    run_test test_rma_win_fence 2
+    run_test test_rma_win_pscw 2
+    run_test test_rma_win_lock 2
+    run_test test_rma_win_flush_sync 2
+    run_test test_rma_put 2
+    run_test test_rma_rput 2
+    run_test test_rma_rget 2
+    run_test test_rma_get 2
+    run_test test_rma_accumulate 2
+    run_test test_rma_raccumulate 2
+    run_test test_rma_get_accumulate 2
+    run_test test_rma_fetch_and_op 2
+    run_test test_rma_compare_and_swap 2
     run_test shared_memory
 fi
 

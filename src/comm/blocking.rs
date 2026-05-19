@@ -4,6 +4,7 @@ use crate::comm::Communicator;
 use crate::datatype::{BytePermutable, DatatypeTag, MpiDatatype, MpiIndexedDatatype};
 use crate::error::{Error, Result};
 use crate::ffi;
+use crate::op::UserOp;
 use crate::ReduceOp;
 
 impl Communicator {
@@ -17,6 +18,9 @@ impl Communicator {
     /// will return until all processes have entered the barrier.
     #[inline]
     pub fn barrier(&self) -> Result<()> {
+        // SAFETY: self.handle is a valid communicator handle registered in the C-side
+        // communicator table. ferrompi_barrier delegates to MPI_Barrier which requires no
+        // buffers; only a valid communicator handle is needed.
         let ret = unsafe { ffi::ferrompi_barrier(self.handle) };
         Error::check_with_op(ret, "barrier")
     }
@@ -47,6 +51,10 @@ impl Communicator {
     #[inline]
     pub fn broadcast<T: MpiDatatype>(&self, data: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T (Rust borrow rules
+            // prevent any aliasing). cast to *mut c_void is the standard FFI convention for
+            // passing typed buffers to C. T::TAG matches T's MPI datatype per ADR-0003.
+            // The slice outlives the blocking call.
             ffi::ferrompi_bcast(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -88,6 +96,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() is verified above.
+            // cast to *const/*mut c_void is the standard FFI convention. T::TAG matches T's MPI
+            // datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_reduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -165,6 +177,10 @@ impl Communicator {
     ) -> Result<()> {
         let is_root = if self.rank() == root { 1i32 } else { 0i32 };
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T. At root,
+            // MPI uses it as both send and receive buffer (MPI_IN_PLACE semantics);
+            // at non-root it is the send buffer only. T::TAG matches T's MPI datatype
+            // per ADR-0003. The slice outlives this blocking call.
             ffi::ferrompi_reduce_inplace(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -207,6 +223,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() is verified above.
+            // cast to *const/*mut c_void is the standard FFI convention. T::TAG matches T's MPI
+            // datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_allreduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -232,6 +252,9 @@ impl Communicator {
     /// ```
     pub fn allreduce_inplace<T: MpiDatatype>(&self, data: &mut [T], op: ReduceOp) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: data is a valid, exclusively-owned mutable slice of T (no aliasing via
+            // Rust borrow rules). MPI uses it as both send (MPI_IN_PLACE) and receive buffer.
+            // T::TAG matches T's MPI datatype per ADR-0003. The slice outlives this blocking call.
             ffi::ferrompi_allreduce_inplace(
                 data.as_mut_ptr().cast::<std::ffi::c_void>(),
                 data.len() as i64,
@@ -258,10 +281,73 @@ impl Communicator {
     /// ```
     pub fn allreduce_scalar<T: MpiDatatype>(&self, value: T, op: ReduceOp) -> Result<T> {
         let send = [value];
-        // SAFETY: T is Copy, so zero-init is safe for numeric types
+        // T is Copy, so zero-init is safe for numeric types.
         let mut recv = [value]; // placeholder, will be overwritten
         self.allreduce(&send, &mut recv, op)?;
         Ok(recv[0])
+    }
+
+    /// All-reduce values using a user-defined reduction operation.
+    ///
+    /// Invokes `MPI_Allreduce` with the `MPI_Op` registered inside `op`.
+    /// Every rank must call this with the same `op`, the same count, and the
+    /// same datatype `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `send` - Data contributed by this process
+    /// * `recv` - Output buffer; must be the same length as `send`
+    /// * `op`   - A user-defined reduction op created with [`UserOp::new`]
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidBuffer`] if `send.len() != recv.len()`
+    /// - An MPI error if the library rejects the call
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ferrompi::{Mpi, UserOp};
+    ///
+    /// let mpi = Mpi::init().unwrap();
+    /// let world = mpi.world();
+    ///
+    /// let op: UserOp<f64> = UserOp::new(|invec: &[f64], inoutvec: &mut [f64]| {
+    ///     for (x, y) in invec.iter().zip(inoutvec.iter_mut()) {
+    ///         *y = x.max(*y);
+    ///     }
+    /// }).unwrap();
+    ///
+    /// let send = vec![world.rank() as f64 + 1.5_f64];
+    /// let mut recv = vec![0.0_f64];
+    /// world.allreduce_with_op(&send, &mut recv, &op).unwrap();
+    /// // recv[0] == (world.size() - 1) as f64 + 1.5
+    /// ```
+    pub fn allreduce_with_op<T: MpiDatatype>(
+        &self,
+        send: &[T],
+        recv: &mut [T],
+        op: &UserOp<T>,
+    ) -> Result<()> {
+        if send.len() != recv.len() {
+            return Err(Error::InvalidBuffer);
+        }
+        let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. op.raw_handle() is a valid MPI_Op
+            // registered by UserOp::new and kept alive for the lifetime of `op`. Both slices
+            // outlive this blocking call.
+            ffi::ferrompi_allreduce_user_op(
+                send.as_ptr().cast::<std::ffi::c_void>(),
+                recv.as_mut_ptr().cast::<std::ffi::c_void>(),
+                send.len() as i64,
+                T::TAG as i32,
+                op.raw_handle(),
+                self.handle,
+            )
+        };
+        Error::check_with_op(ret, "allreduce_user_op")
     }
 
     /// All-reduce paired value+index types using `MPI_MAXLOC` or `MPI_MINLOC`.
@@ -324,6 +410,11 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T
+            // (T: MpiIndexedDatatype — one of the six predefined MPI paired types). They cannot
+            // alias (Rust borrow rules). send.len() == recv.len() verified above. op has been
+            // validated to be MaxLoc or MinLoc, which are the only valid ops for indexed types.
+            // T::TAG matches T's MPI paired datatype per ADR-0003. Slices outlive this call.
             ffi::ferrompi_allreduce(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -333,7 +424,7 @@ impl Communicator {
                 self.handle,
             )
         };
-        Error::check_with_op(ret, "allreduce")
+        Error::check_with_op(ret, "allreduce_indexed")
     }
 
     /// All-reduce arbitrary `Copy` types using `MPI_BYTE`-typed bitwise reductions.
@@ -421,7 +512,7 @@ impl Communicator {
                 self.handle,
             )
         };
-        Error::check_with_op(ret, "allreduce")
+        Error::check_with_op(ret, "allreduce_bytes")
     }
 
     /// Inclusive prefix reduction (scan).
@@ -456,6 +547,9 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_scan(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -506,6 +600,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() verified above.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking
+            // call. Note: MPI leaves recv undefined on rank 0, which is documented above.
             ffi::ferrompi_exscan(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -590,6 +688,9 @@ impl Communicator {
     /// ```
     pub fn gather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). At non-root, recv is ignored by MPI.
+            // T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_gather(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -617,6 +718,9 @@ impl Communicator {
     /// ```
     pub fn allgather<T: MpiDatatype>(&self, send: &[T], recv: &mut [T]) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices outlive this blocking call.
             ffi::ferrompi_allgather(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 send.len() as i64,
@@ -880,6 +984,9 @@ impl Communicator {
     /// ```
     pub fn scatter<T: MpiDatatype>(&self, send: &[T], recv: &mut [T], root: i32) -> Result<()> {
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice (ignored by MPI at non-root) and recv is a
+            // valid exclusive slice of T; they cannot alias (Rust borrow rules). T::TAG matches
+            // T's MPI datatype per ADR-0003. Both slices outlive this blocking call.
             ffi::ferrompi_scatter(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.len() as i64,
@@ -925,6 +1032,10 @@ impl Communicator {
         }
         let count = (send.len() / size) as i64;
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() and divisibility
+            // by size are both verified above. T::TAG matches T's MPI datatype per ADR-0003.
+            // Both slices outlive this blocking call.
             ffi::ferrompi_alltoall(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 count,
@@ -973,6 +1084,10 @@ impl Communicator {
             return Err(Error::InvalidBuffer);
         }
         let ret = unsafe {
+            // SAFETY: send is a valid shared slice and recv is a valid exclusive slice of T;
+            // they cannot alias (Rust borrow rules). send.len() == recv.len() * size is verified
+            // above. T::TAG matches T's MPI datatype per ADR-0003. Both slices outlive this
+            // blocking call.
             ffi::ferrompi_reduce_scatter_block(
                 send.as_ptr().cast::<std::ffi::c_void>(),
                 recv.as_mut_ptr().cast::<std::ffi::c_void>(),
@@ -1171,5 +1286,23 @@ mod tests {
         let mut recv = [0u32; 3];
         let result = comm.allreduce_bytes(&send, &mut recv, ReduceOp::BitwiseOr);
         assert!(matches!(result, Err(Error::InvalidBuffer)));
+    }
+
+    #[test]
+    fn allreduce_indexed_error_tag_renders_correctly() {
+        use crate::error::MpiErrorClass;
+        // Construct the error directly (no MPI runtime needed) to verify
+        // the operation tag appears correctly in the Display output.
+        let err = Error::Mpi {
+            class: MpiErrorClass::Arg,
+            code: 13,
+            message: "synthetic".to_string(),
+            operation: Some("allreduce_indexed"),
+        };
+        let s = format!("{err}");
+        assert!(
+            s.starts_with("MPI error in allreduce_indexed: "),
+            "expected operation tag 'allreduce_indexed' in Display output, got: {s}"
+        );
     }
 }
